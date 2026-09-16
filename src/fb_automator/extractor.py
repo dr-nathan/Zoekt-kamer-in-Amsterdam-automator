@@ -9,7 +9,7 @@ from typing import Any, Callable
 from fb_automator.listing_models import ExtractedListing, ListingAttributes
 from fb_automator.storage import PostStore
 
-DEFAULT_MODEL = "gpt-5-mini"
+DEFAULT_MODEL = "gpt-5-nano"
 EXTRACTION_VERSION = "llm-v1"
 
 SYSTEM_PROMPT = """You extract structured housing-listing data from Facebook group posts.

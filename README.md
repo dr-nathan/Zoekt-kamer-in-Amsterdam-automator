@@ -62,7 +62,7 @@ availability, registration, contract, furnishing, applicant requirements, amenit
 summary, and concise Particularities labels. Every material field keeps a supporting quote and
 confidence score. Raw captured posts remain unchanged.
 
-The default model is `gpt-5-mini`. Override it with `OPENAI_MODEL` or `--model`. Results are cached
+The default model is `gpt-5-nano`. Override it with `OPENAI_MODEL` or `--model`. Results are cached
 by the post text, extraction version, and model, so unchanged posts do not incur another API call.
 Use `--force` to deliberately rebuild them or `--limit 5` for a small trial.
 

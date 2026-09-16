@@ -44,7 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     extract.add_argument(
         "--model",
-        help="OpenAI model (default: OPENAI_MODEL or gpt-5-mini).",
+        help="OpenAI model (default: OPENAI_MODEL or gpt-5-nano).",
     )
     extract.add_argument(
         "--force",
