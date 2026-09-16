@@ -49,6 +49,17 @@ or IP addresses when it detects automated collection. The collector enforces a m
 scroll pause, backs off when scrolling produces no new posts, and stops if Facebook displays a
 login checkpoint or temporary-block warning.
 
+## Extract filterable listings
+
+```bash
+fb-housing extract
+```
+
+This leaves the captured posts unchanged and rebuilds a normalized `listings` table in the same
+database. It extracts price, size, location, availability, registration, contract, furnishing,
+applicant requirements, amenities, and concise Particularities labels. Every inferred field keeps
+the matching source phrase and a confidence score so extraction errors remain inspectable.
+
 Run the unit tests with:
 
 ```bash

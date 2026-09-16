@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fb_automator.collector import FacebookCollector
 from fb_automator.config import load_groups
+from fb_automator.extractor import extract_database
 
 DEFAULT_PROFILE = Path(".state/facebook-profile")
 DEFAULT_DATABASE = Path("data/listings.db")
@@ -36,11 +37,21 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Hide the browser. Use only after visible collection works reliably.",
     )
+
+    extract = subparsers.add_parser(
+        "extract", help="Extract filterable attributes from saved raw posts."
+    )
+    extract.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
+    if args.command == "extract":
+        processed, total = extract_database(args.database)
+        print(f"extracted={processed} database_total={total}")
+        return
+
     collector = FacebookCollector(
         profile_dir=args.profile_dir,
         database=getattr(args, "database", DEFAULT_DATABASE),
