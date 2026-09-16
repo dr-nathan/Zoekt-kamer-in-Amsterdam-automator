@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fb-housing-collector"
+version = "0.1.0"
+description = "Private Facebook housing-group collector and listing browser"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "playwright>=1.55,<2",
+]
+
+[project.scripts]
+fb-housing = "fb_automator.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

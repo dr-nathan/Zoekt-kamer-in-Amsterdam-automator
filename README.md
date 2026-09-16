@@ -1,6 +1,65 @@
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+# Amsterdam Facebook housing collector
 
-# Facebook automatic Room Listings fetch&filter
+This experimental branch is rebuilding the original script as a private pipeline:
+
+1. Open Facebook in a real, visible Chromium browser.
+2. Reuse a locally saved login session to read configured housing groups.
+3. Store recent posts in a deduplicated SQLite database.
+4. Later, extract structured housing attributes and expose them in a private web UI.
+
+The collector does not store a Facebook password. Browser session data stays under `.state/`,
+which is excluded from Git. The database and collected posts stay under `data/`, also excluded
+from Git.
+
+## Setup
+
+```bash
+conda activate fb
+python -m pip install -e .
+python -m playwright install chromium
+```
+
+Create the private group configuration:
+
+```bash
+cp config/groups.example.json config/groups.json
+```
+
+Edit `config/groups.json` and add each group name and URL. This file is intentionally ignored.
+
+## First login
+
+```bash
+fb-housing login
+```
+
+A browser opens. Sign in manually, wait for the Facebook home feed, then return to the terminal
+and press Enter. Never commit `.state/` or share it: the saved browser state can access the
+Facebook account.
+
+## Collect a small sample
+
+```bash
+fb-housing collect --max-posts 50
+```
+
+The collector stays visible by default so failures are understandable. Results are stored in
+`data/listings.db`. Start with one group and a small post limit; Facebook can restrict accounts
+or IP addresses when it detects automated collection.
+
+Run the unit tests with:
+
+```bash
+python -m unittest discover -s tests
+```
+
+## Privacy boundary
+
+This project is for a single user's private browsing interface. Do not publish session state or
+raw private-group content. The later UI should minimize stored personal data and link back to the
+original Facebook post.
+
+## Legacy prototype
 
 ### Description
 The goal of this code is as follows:
