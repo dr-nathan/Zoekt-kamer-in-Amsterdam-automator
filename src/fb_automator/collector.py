@@ -12,7 +12,7 @@ from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sy
 from fb_automator.models import GroupSource, RawPost
 from fb_automator.storage import PostStore
 
-MESSAGE_SELECTOR = '[data-ad-preview="message"]'
+POST_BODY_SELECTOR = '[data-ad-preview="message"], div[dir="auto"]'
 POST_PATH = re.compile(r"/groups/[^/]+/(?:posts|permalink)/([^/?#]+)")
 SEE_MORE_LABELS = ("See more", "Meer weergeven")
 
@@ -99,9 +99,12 @@ class FacebookCollector:
     @staticmethod
     def _wait_for_feed(page: Page) -> None:
         try:
-            page.locator(MESSAGE_SELECTOR).first.wait_for(state="visible", timeout=20_000)
+            page.locator('a[href*="/posts/"]').first.wait_for(
+                state="attached", timeout=20_000
+            )
+            page.wait_for_timeout(2_000)
         except PlaywrightTimeoutError:
-            print("  warning: no post messages detected; trying extraction anyway")
+            print("  warning: no post links detected; trying extraction anyway")
 
     def _collect_group(
         self, page: Page, group: GroupSource, max_posts: int, max_scrolls: int
@@ -113,24 +116,32 @@ class FacebookCollector:
             self._expand_visible_posts(page)
             for post in self._extract_visible_posts(page, group):
                 key = post.post_id or post.post_url or post.text
-                if key:
+                previous_post = collected.get(key)
+                if key and (
+                    previous_post is None or len(post.text) > len(previous_post.text)
+                ):
                     collected[key] = post
                 if len(collected) >= max_posts:
                     return list(collected.values())[:max_posts]
 
             previous = len(collected)
-            messages = page.locator(MESSAGE_SELECTOR)
-            if messages.count():
-                try:
-                    messages.last.scroll_into_view_if_needed(timeout=2_000)
-                except Exception:
-                    pass
-            page.mouse.wheel(0, 1_800)
+            before_scroll = page.evaluate("document.scrollingElement.scrollTop")
+            page.keyboard.press("PageDown")
             time.sleep(self.scroll_pause)
+            after_scroll = page.evaluate("document.scrollingElement.scrollTop")
+            if after_scroll == before_scroll:
+                page.evaluate(
+                    "document.scrollingElement.scrollTop += "
+                    "Math.round(window.innerHeight * 0.8)"
+                )
+                time.sleep(self.scroll_pause)
             self._expand_visible_posts(page)
             for post in self._extract_visible_posts(page, group):
                 key = post.post_id or post.post_url or post.text
-                if key:
+                previous_post = collected.get(key)
+                if key and (
+                    previous_post is None or len(post.text) > len(previous_post.text)
+                ):
                     collected[key] = post
 
             if len(collected) == previous:
@@ -155,28 +166,38 @@ class FacebookCollector:
     @staticmethod
     def _extract_visible_posts(page: Page, group: GroupSource) -> list[RawPost]:
         scraped_at = datetime.now(UTC).isoformat()
-        raw_items: list[dict[str, Any]] = page.locator(MESSAGE_SELECTOR).evaluate_all(
+        raw_items: list[dict[str, Any]] = page.locator(POST_BODY_SELECTOR).evaluate_all(
             """
             (nodes) => {
               const unique = [...new Set(nodes)];
               return unique.map((message) => {
+                const explicitMessage = message.hasAttribute('data-ad-preview') ||
+                                        message.hasAttribute('data-ad-comet-preview');
+                const text = (message.innerText || message.textContent || '').trim();
+                if (!text || (!explicitMessage && text.length < 40)) return null;
+
                 let container = message;
+                let hops = 0;
                 while (container && container !== document.body) {
                   if (container.querySelector('a[href*="/posts/"]')) break;
                   container = container.parentElement;
+                  hops += 1;
                 }
+                if (!container || container === document.body) return null;
+                if (!explicitMessage && hops > 8) return null;
+
                 const links = [...(container || message).querySelectorAll('a[href]')]
                   .map((anchor) => ({
                   href: anchor.href,
                   label: anchor.getAttribute('aria-label') ||
                          anchor.getAttribute('title') ||
                          anchor.textContent || ''
-                  }));
+                }));
                 return {
-                  text: (message.innerText || message.textContent || '').trim(),
+                  text,
                   links
                 };
-              });
+              }).filter(Boolean);
             }
             """
         )
