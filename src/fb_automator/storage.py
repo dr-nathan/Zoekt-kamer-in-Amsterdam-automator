@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS listings (
     room_size_m2 REAL,
     property_size_m2 REAL,
     location_text TEXT,
+    city TEXT,
+    neighborhood TEXT,
     available_from TEXT,
     available_to TEXT,
     lease_type TEXT NOT NULL,
@@ -50,7 +52,9 @@ CREATE TABLE IF NOT EXISTS listings (
     private_bathroom INTEGER,
     amenities_json TEXT NOT NULL,
     particularities_json TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
     evidence_json TEXT NOT NULL,
+    source_hash TEXT NOT NULL DEFAULT '',
     extraction_version TEXT NOT NULL,
     extracted_at TEXT NOT NULL,
     FOREIGN KEY (raw_post_key) REFERENCES raw_posts(dedupe_key) ON DELETE CASCADE
@@ -76,6 +80,24 @@ class PostStore:
         self.connection.execute("PRAGMA foreign_keys=ON")
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.executescript(SCHEMA)
+        self._migrate_listing_columns()
+
+    def _migrate_listing_columns(self) -> None:
+        existing = {
+            row[1] for row in self.connection.execute("PRAGMA table_info(listings)")
+        }
+        additions = {
+            "city": "TEXT",
+            "neighborhood": "TEXT",
+            "summary": "TEXT NOT NULL DEFAULT ''",
+            "source_hash": "TEXT NOT NULL DEFAULT ''",
+        }
+        with self.connection:
+            for name, declaration in additions.items():
+                if name not in existing:
+                    self.connection.execute(
+                        f"ALTER TABLE listings ADD COLUMN {name} {declaration}"
+                    )
 
     def close(self) -> None:
         self.connection.close()
@@ -134,24 +156,38 @@ class PostStore:
         row = self.connection.execute("SELECT COUNT(*) FROM raw_posts").fetchone()
         return int(row[0])
 
-    def raw_posts_for_extraction(self) -> list[dict[str, str]]:
+    def raw_posts_for_extraction(self) -> list[dict[str, str | None]]:
         rows = self.connection.execute(
-            "SELECT dedupe_key, text, last_seen_at FROM raw_posts ORDER BY last_seen_at DESC"
+            """
+            SELECT r.dedupe_key, r.text, r.last_seen_at,
+                   l.source_hash, l.extraction_version
+            FROM raw_posts AS r
+            LEFT JOIN listings AS l ON l.raw_post_key = r.dedupe_key
+            ORDER BY r.last_seen_at DESC
+            """
         )
         return [
-            {"dedupe_key": key, "text": text, "last_seen_at": last_seen_at}
-            for key, text, last_seen_at in rows
+            {
+                "dedupe_key": key,
+                "text": text,
+                "last_seen_at": last_seen_at,
+                "source_hash": source_hash,
+                "extraction_version": extraction_version,
+            }
+            for key, text, last_seen_at, source_hash, extraction_version in rows
         ]
 
     def upsert_listings(self, listings: list[ListingAttributes]) -> None:
         columns = (
             "raw_post_key", "listing_kind", "monthly_rent", "utilities",
             "deposit_amount", "deposit_months", "room_size_m2", "property_size_m2",
-            "location_text", "available_from", "available_to", "lease_type",
+            "location_text", "city", "neighborhood", "available_from",
+            "available_to", "lease_type",
             "registration", "furnishing", "gender", "age_min", "age_max",
             "dutch_requirement", "internationals", "applicant_status",
             "private_bathroom", "amenities_json", "particularities_json",
-            "evidence_json", "extraction_version", "extracted_at",
+            "summary", "evidence_json", "source_hash", "extraction_version",
+            "extracted_at",
         )
         placeholders = ", ".join("?" for _ in columns)
         updates = ", ".join(
@@ -172,6 +208,8 @@ class PostStore:
                 item.room_size_m2,
                 item.property_size_m2,
                 item.location_text,
+                item.city,
+                item.neighborhood,
                 item.available_from,
                 item.available_to,
                 item.lease_type.value,
@@ -186,7 +224,9 @@ class PostStore:
                 None if item.private_bathroom is None else int(item.private_bathroom),
                 json.dumps(item.amenities, ensure_ascii=False),
                 json.dumps(item.particularities, ensure_ascii=False),
-                json.dumps(item.evidence_dict(), ensure_ascii=False),
+                item.summary,
+                json.dumps(item.evidence_jsonable(), ensure_ascii=False),
+                item.source_hash,
                 item.extraction_version,
                 item.extracted_at,
             )

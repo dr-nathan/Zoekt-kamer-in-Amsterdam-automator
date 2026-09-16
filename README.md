@@ -52,13 +52,23 @@ login checkpoint or temporary-block warning.
 ## Extract filterable listings
 
 ```bash
+export OPENAI_API_KEY="your-api-key"
 fb-housing extract
 ```
 
-This leaves the captured posts unchanged and rebuilds a normalized `listings` table in the same
-database. It extracts price, size, location, availability, registration, contract, furnishing,
-applicant requirements, amenities, and concise Particularities labels. Every inferred field keeps
-the matching source phrase and a confidence score so extraction errors remain inspectable.
+The extractor sends each pending post to the OpenAI Responses API with Structured Outputs and
+writes the validated result to the normalized `listings` table. It extracts price, size, location,
+availability, registration, contract, furnishing, applicant requirements, amenities, a short
+summary, and concise Particularities labels. Every material field keeps a supporting quote and
+confidence score. Raw captured posts remain unchanged.
+
+The default model is `gpt-5-mini`. Override it with `OPENAI_MODEL` or `--model`. Results are cached
+by the post text, extraction version, and model, so unchanged posts do not incur another API call.
+Use `--force` to deliberately rebuild them or `--limit 5` for a small trial.
+
+Private-group post text is sent to the configured OpenAI API project during extraction. API
+response storage is disabled (`store=False`), but do not run extraction if that data transfer is
+incompatible with your privacy requirements.
 
 Run the unit tests with:
 

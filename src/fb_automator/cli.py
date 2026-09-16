@@ -42,14 +42,38 @@ def build_parser() -> argparse.ArgumentParser:
         "extract", help="Extract filterable attributes from saved raw posts."
     )
     extract.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+    extract.add_argument(
+        "--model",
+        help="OpenAI model (default: OPENAI_MODEL or gpt-5-mini).",
+    )
+    extract.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-extract posts even when their content is unchanged.",
+    )
+    extract.add_argument("--limit", type=int, help="Extract at most this many pending posts.")
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
     if args.command == "extract":
-        processed, total = extract_database(args.database)
-        print(f"extracted={processed} database_total={total}")
+        if args.limit is not None and args.limit < 1:
+            raise SystemExit("error: --limit must be at least 1")
+        try:
+            processed, cached, remaining, total = extract_database(
+                args.database,
+                model=args.model,
+                force=args.force,
+                limit=args.limit,
+                progress=lambda done, count: print(f"extracting {done}/{count}"),
+            )
+        except (RuntimeError, ValueError) as exc:
+            raise SystemExit(f"error: {exc}") from exc
+        print(
+            f"extracted={processed} cached={cached} "
+            f"pending={remaining} database_total={total}"
+        )
         return
 
     collector = FacebookCollector(
