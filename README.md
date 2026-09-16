@@ -45,7 +45,9 @@ fb-housing collect --max-posts 50
 
 The collector stays visible by default so failures are understandable. Results are stored in
 `data/listings.db`. Start with one group and a small post limit; Facebook can restrict accounts
-or IP addresses when it detects automated collection.
+or IP addresses when it detects automated collection. The collector enforces a minimum two-second
+scroll pause, backs off when scrolling produces no new posts, and stops if Facebook displays a
+login checkpoint or temporary-block warning.
 
 Run the unit tests with:
 

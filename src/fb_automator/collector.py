@@ -15,6 +15,11 @@ from fb_automator.storage import PostStore
 POST_BODY_SELECTOR = '[data-ad-preview="message"], div[dir="auto"]'
 POST_PATH = re.compile(r"/groups/[^/]+/(?:posts|permalink)/([^/?#]+)")
 SEE_MORE_LABELS = ("See more", "Meer weergeven")
+BLOCK_MESSAGE = re.compile(
+    r"temporarily blocked|going too fast|try again later|"
+    r"tijdelijk geblokkeerd|te snel|probeer het later opnieuw",
+    re.IGNORECASE,
+)
 
 
 def canonical_post_url(url: str) -> str | None:
@@ -80,9 +85,7 @@ class FacebookCollector:
             for group in groups:
                 print(f"Collecting {group.name}: {group.url}")
                 page.goto(group.url, wait_until="domcontentloaded", timeout=60_000)
-                if self._looks_logged_out(page):
-                    context.close()
-                    raise RuntimeError("Facebook session expired. Run `fb-housing login` again.")
+                self._guard_access(page)
                 self._wait_for_feed(page)
                 posts = self._collect_group(page, group, max_posts, max_scrolls)
                 inserted, updated = store.upsert(posts)
@@ -95,6 +98,22 @@ class FacebookCollector:
     @staticmethod
     def _looks_logged_out(page: Page) -> bool:
         return page.locator('input[name="email"], input[name="pass"]').count() > 0
+
+    @classmethod
+    def _guard_access(cls, page: Page) -> None:
+        if cls._looks_logged_out(page) or "/login" in page.url:
+            raise RuntimeError("Facebook session expired. Run `fb-housing login` again.")
+        if "/checkpoint" in page.url or page.locator(
+            'form[action*="checkpoint"], input[name="approvals_code"]'
+        ).count():
+            raise RuntimeError(
+                "Facebook requested an account checkpoint. Collection stopped immediately."
+            )
+        if page.get_by_text(BLOCK_MESSAGE).count():
+            raise RuntimeError(
+                "Facebook displayed a temporary-block or rate-limit warning. "
+                "Collection stopped immediately."
+            )
 
     @staticmethod
     def _wait_for_feed(page: Page) -> None:
@@ -113,6 +132,7 @@ class FacebookCollector:
         unchanged_rounds = 0
 
         for _ in range(max_scrolls + 1):
+            self._guard_access(page)
             self._expand_visible_posts(page)
             for post in self._extract_visible_posts(page, group):
                 key = post.post_id or post.post_url or post.text
@@ -127,14 +147,16 @@ class FacebookCollector:
             previous = len(collected)
             before_scroll = page.evaluate("document.scrollingElement.scrollTop")
             page.keyboard.press("PageDown")
-            time.sleep(self.scroll_pause)
+            wait_time = self.scroll_pause + min(unchanged_rounds * 1.5, 6.0)
+            time.sleep(wait_time)
             after_scroll = page.evaluate("document.scrollingElement.scrollTop")
             if after_scroll == before_scroll:
                 page.evaluate(
                     "document.scrollingElement.scrollTop += "
                     "Math.round(window.innerHeight * 0.8)"
                 )
-                time.sleep(self.scroll_pause)
+                time.sleep(wait_time)
+            self._guard_access(page)
             self._expand_visible_posts(page)
             for post in self._extract_visible_posts(page, group):
                 key = post.post_id or post.post_url or post.text

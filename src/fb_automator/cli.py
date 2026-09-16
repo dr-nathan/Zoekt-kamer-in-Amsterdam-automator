@@ -25,7 +25,12 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     collect.add_argument("--max-posts", type=int, default=50)
     collect.add_argument("--max-scrolls", type=int, default=15)
-    collect.add_argument("--scroll-pause", type=float, default=3.0)
+    collect.add_argument(
+        "--scroll-pause",
+        type=float,
+        default=3.0,
+        help="Base seconds between scrolls (minimum: 2; default: 3).",
+    )
     collect.add_argument(
         "--headless",
         action="store_true",
@@ -47,8 +52,10 @@ def main() -> None:
         if args.command == "login":
             collector.login()
         elif args.command == "collect":
-            if args.max_posts < 1 or args.max_scrolls < 0 or args.scroll_pause < 0:
-                raise ValueError("Collection limits and pause must be non-negative.")
+            if args.max_posts < 1 or args.max_scrolls < 0:
+                raise ValueError("Collection limits must be non-negative.")
+            if args.scroll_pause < 2:
+                raise ValueError("Scroll pause must be at least 2 seconds.")
             collector.collect(
                 load_groups(args.groups),
                 max_posts=args.max_posts,
