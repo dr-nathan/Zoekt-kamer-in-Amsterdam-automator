@@ -117,7 +117,13 @@ class ExtractedListing(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    listing_kind: ListingKind
+    listing_kind: ListingKind = Field(
+        description=(
+            "Housing transaction direction: offer when the poster has housing and seeks a tenant "
+            "or roommate; wanted only when the poster seeks housing for themselves; "
+            "co_application when seeking someone to jointly apply for housing."
+        )
+    )
     monthly_rent: float | None = Field(
         ge=0, description="Monthly rent in euros, excluding deposits."
     )

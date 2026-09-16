@@ -64,7 +64,8 @@ confidence score. Raw captured posts remain unchanged.
 
 The default model is `gpt-5-nano`. Override it with `OPENAI_MODEL` or `--model`. Results are cached
 by the post text, extraction version, and model, so unchanged posts do not incur another API call.
-Use `--force` to deliberately rebuild them or `--limit 5` for a small trial.
+Use `--force` to deliberately rebuild them or `--limit 5` for a small trial. Extraction uses four
+concurrent API requests by default; adjust this with `--workers` if needed.
 
 Private-group post text is sent to the configured OpenAI API project during extraction. API
 response storage is disabled (`store=False`), but do not run extraction if that data transfer is

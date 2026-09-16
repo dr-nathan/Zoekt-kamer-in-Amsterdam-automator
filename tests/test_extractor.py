@@ -89,7 +89,7 @@ class ExtractorTests(unittest.TestCase):
         self.assertEqual(listing.monthly_rent, 900)
         self.assertEqual(listing.amenities, ("balcony",))
         self.assertEqual(len(listing.evidence), 1)
-        self.assertEqual(listing.extraction_version, "llm-v1:test-model")
+        self.assertEqual(listing.extraction_version, "llm-v2:test-model")
         call = client.responses.calls[0]
         self.assertIs(call["text_format"], ExtractedListing)
         self.assertFalse(call["store"])
@@ -130,7 +130,7 @@ class ExtractorTests(unittest.TestCase):
                 "offer",
                 900,
                 "Room in Amsterdam West with registration possible.",
-                "llm-v1:test-model",
+                "llm-v2:test-model",
             ),
         )
         self.assertEqual(len(client.responses.calls), 1)

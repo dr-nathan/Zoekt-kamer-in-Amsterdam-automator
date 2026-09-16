@@ -52,6 +52,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Re-extract posts even when their content is unchanged.",
     )
     extract.add_argument("--limit", type=int, help="Extract at most this many pending posts.")
+    extract.add_argument(
+        "--workers",
+        type=int,
+        default=4,
+        help="Concurrent API requests (default: 4).",
+    )
     return parser
 
 
@@ -60,12 +66,15 @@ def main() -> None:
     if args.command == "extract":
         if args.limit is not None and args.limit < 1:
             raise SystemExit("error: --limit must be at least 1")
+        if args.workers < 1:
+            raise SystemExit("error: --workers must be at least 1")
         try:
             processed, cached, remaining, total = extract_database(
                 args.database,
                 model=args.model,
                 force=args.force,
                 limit=args.limit,
+                workers=args.workers,
                 progress=lambda done, count: print(f"extracting {done}/{count}"),
             )
         except (RuntimeError, ValueError) as exc:
