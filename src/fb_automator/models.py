@@ -18,6 +18,8 @@ class RawPost:
     text: str
     published_label: str | None
     scraped_at: str
+    reaction_count: int | None = None
+    comment_count: int | None = None
 
-    def as_dict(self) -> dict[str, str | None]:
+    def as_dict(self) -> dict[str, str | int | None]:
         return asdict(self)

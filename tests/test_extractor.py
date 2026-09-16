@@ -93,6 +93,7 @@ class ExtractorTests(unittest.TestCase):
         call = client.responses.calls[0]
         self.assertIs(call["text_format"], ExtractedListing)
         self.assertFalse(call["store"])
+        self.assertEqual(call["prompt_cache_key"], "fb-housing:llm-v2:test-model")
         self.assertEqual(call["input"][0]["role"], "developer")
         self.assertIn("untrusted data", call["input"][0]["content"])
 
@@ -115,6 +116,19 @@ class ExtractorTests(unittest.TestCase):
                 extract_database(database, model="test-model", client=client),
                 (1, 0, 0, 1),
             )
+            refreshed_post = RawPost(
+                group_name=post.group_name,
+                group_url=post.group_url,
+                post_id=post.post_id,
+                post_url=post.post_url,
+                text=post.text,
+                published_label="3 h",
+                scraped_at="2026-09-16T11:00:00+00:00",
+                reaction_count=25,
+                comment_count=8,
+            )
+            with PostStore(database) as store:
+                store.upsert([refreshed_post])
             self.assertEqual(
                 extract_database(database, model="test-model", client=client),
                 (0, 1, 0, 1),

@@ -78,6 +78,7 @@ class LLMListingExtractor:
             ],
             text_format=ExtractedListing,
             store=False,
+            prompt_cache_key=f"fb-housing:{EXTRACTION_VERSION}:{self.model}",
         )
         parsed = response.output_parsed
         if parsed is None:

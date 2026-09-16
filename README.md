@@ -49,6 +49,10 @@ or IP addresses when it detects automated collection. The collector enforces a m
 scroll pause, backs off when scrolling produces no new posts, and stops if Facebook displays a
 login checkpoint or temporary-block warning.
 
+Each collection also captures the visible reaction and comment counts. `raw_posts` keeps the latest
+known counts, while `engagement_snapshots` keeps dated observations so popularity can be graphed or
+ranked later. Missing Facebook UI counters are stored as unknown rather than assumed to be zero.
+
 ## Extract filterable listings
 
 ```bash
@@ -66,6 +70,9 @@ The default model is `gpt-5-nano`. Override it with `OPENAI_MODEL` or `--model`.
 by the post text, extraction version, and model, so unchanged posts do not incur another API call.
 Use `--force` to deliberately rebuild them or `--limit 5` for a small trial. Extraction uses four
 concurrent API requests by default; adjust this with `--workers` if needed.
+Re-collecting a post only refreshes its timestamps and engagement counts; it does not invalidate the
+LLM result unless the post text changes. A stable prompt-cache key also lets eligible API requests
+reuse the common extraction instructions.
 
 Private-group post text is sent to the configured OpenAI API project during extraction. API
 response storage is disabled (`store=False`), but do not run extraction if that data transfer is

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import time
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,87 @@ BLOCK_MESSAGE = re.compile(
     r"tijdelijk geblokkeerd|te snel|probeer het later opnieuw",
     re.IGNORECASE,
 )
+COUNT_TOKEN = r"\d+(?:[.,]\d+)?[Kk]?(?![\dA-Za-z])"
+COMMENT_WORDS = r"comments?|commentaren?|opmerkingen?"
+REACTION_WORDS = r"reactions?|reacties?|likes?|vind-ik-leuks?"
+COMMENT_HINT = re.compile(r"comment|commentaar|opmerking", re.IGNORECASE)
+REACTION_HINT = re.compile(
+    r"reaction|reactie|reacted|gereageerd|likes?|vind-ik-leuk", re.IGNORECASE
+)
+
+
+def _human_count(value: str) -> int | None:
+    compact = re.sub(r"\s+", "", value.strip())
+    match = re.fullmatch(r"([\d.,]+)([Kk]?)", compact)
+    if not match:
+        return None
+    number, suffix = match.groups()
+    if suffix:
+        normalized = number.replace(",", ".")
+        if normalized.count(".") > 1:
+            parts = normalized.split(".")
+            normalized = "".join(parts[:-1]) + "." + parts[-1]
+        amount = float(normalized)
+        return round(amount * 1_000)
+    return int(re.sub(r"[.,]", "", number))
+
+
+def _engagement_count(
+    candidates: list[dict[str, str]], word_pattern: str, hint_pattern: re.Pattern[str]
+) -> int | None:
+    counts: list[int] = []
+    expressions = (
+        re.compile(rf"(?P<count>{COUNT_TOKEN})\s*(?:{word_pattern})", re.IGNORECASE),
+        re.compile(rf"(?:{word_pattern})\s*[:·-]?\s*(?P<count>{COUNT_TOKEN})", re.IGNORECASE),
+    )
+    for candidate in candidates:
+        label = " ".join(
+            candidate.get(field, "") for field in ("aria_label", "title", "text")
+        ).strip()
+        for expression in expressions:
+            for match in expression.finditer(label):
+                count = _human_count(match.group("count"))
+                if count is not None:
+                    counts.append(count)
+        hint = " ".join(
+            candidate.get(field, "")
+            for field in ("aria_label", "title", "href")
+        )
+        text = candidate.get("text", "").strip()
+        if hint_pattern.search(hint) and re.fullmatch(COUNT_TOKEN, text):
+            count = _human_count(text)
+            if count is not None:
+                counts.append(count)
+    return max(counts) if counts else None
+
+
+def parse_engagement_counts(
+    candidates: list[dict[str, str]],
+) -> tuple[int | None, int | None]:
+    return (
+        _engagement_count(candidates, REACTION_WORDS, REACTION_HINT),
+        _engagement_count(candidates, COMMENT_WORDS, COMMENT_HINT),
+    )
+
+
+def merge_post_observations(previous: RawPost | None, current: RawPost) -> RawPost:
+    if previous is None:
+        return current
+    content = current if len(current.text) > len(previous.text) else previous
+    return replace(
+        content,
+        scraped_at=current.scraped_at,
+        reaction_count=(
+            current.reaction_count
+            if current.reaction_count is not None
+            else previous.reaction_count
+        ),
+        comment_count=(
+            current.comment_count
+            if current.comment_count is not None
+            else previous.comment_count
+        ),
+    )
 
 
 def canonical_post_url(url: str) -> str | None:
@@ -136,11 +218,8 @@ class FacebookCollector:
             self._expand_visible_posts(page)
             for post in self._extract_visible_posts(page, group):
                 key = post.post_id or post.post_url or post.text
-                previous_post = collected.get(key)
-                if key and (
-                    previous_post is None or len(post.text) > len(previous_post.text)
-                ):
-                    collected[key] = post
+                if key:
+                    collected[key] = merge_post_observations(collected.get(key), post)
                 if len(collected) >= max_posts:
                     return list(collected.values())[:max_posts]
 
@@ -160,11 +239,8 @@ class FacebookCollector:
             self._expand_visible_posts(page)
             for post in self._extract_visible_posts(page, group):
                 key = post.post_id or post.post_url or post.text
-                previous_post = collected.get(key)
-                if key and (
-                    previous_post is None or len(post.text) > len(previous_post.text)
-                ):
-                    collected[key] = post
+                if key:
+                    collected[key] = merge_post_observations(collected.get(key), post)
 
             if len(collected) == previous:
                 unchanged_rounds += 1
@@ -215,9 +291,23 @@ class FacebookCollector:
                          anchor.getAttribute('title') ||
                          anchor.textContent || ''
                 }));
+                const engagement = [...(container || message).querySelectorAll(
+                  '[aria-label], [title], [role="button"], a[href]'
+                )].map((element) => ({
+                  aria_label: element.getAttribute('aria-label') || '',
+                  title: element.getAttribute('title') || '',
+                  text: (element.innerText || element.textContent || '').trim().slice(0, 100),
+                  href: element.getAttribute('href') || ''
+                })).filter((item) => {
+                  const value = `${item.aria_label} ${item.title} ${item.text} ${item.href}`
+                    .toLowerCase();
+                  return /comment|commentaar|opmerking|react|gereageerd|like|vind-ik-leuk/
+                    .test(value);
+                }).slice(0, 100);
                 return {
                   text,
-                  links
+                  links,
+                  engagement
                 };
               }).filter(Boolean);
             }
@@ -237,6 +327,9 @@ class FacebookCollector:
                     post_url = candidate
                     published_label = str(link.get("label", "")).strip() or None
                     break
+            reaction_count, comment_count = parse_engagement_counts(
+                item.get("engagement", [])
+            )
             posts.append(
                 RawPost(
                     group_name=group.name,
@@ -246,6 +339,8 @@ class FacebookCollector:
                     text=text,
                     published_label=published_label,
                     scraped_at=scraped_at,
+                    reaction_count=reaction_count,
+                    comment_count=comment_count,
                 )
             )
         return posts

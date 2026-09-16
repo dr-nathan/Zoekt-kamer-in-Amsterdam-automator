@@ -16,6 +16,8 @@ class PostStoreTests(unittest.TestCase):
             text="A room is available",
             published_label="2 h",
             scraped_at="2026-09-16T10:00:00+00:00",
+            reaction_count=4,
+            comment_count=2,
         )
         second = RawPost(
             group_name="Housing",
@@ -25,6 +27,8 @@ class PostStoreTests(unittest.TestCase):
             text="A room is available (edited)",
             published_label="3 h",
             scraped_at="2026-09-16T11:00:00+00:00",
+            reaction_count=9,
+            comment_count=5,
         )
         with tempfile.TemporaryDirectory() as directory:
             with PostStore(Path(directory) / "posts.db") as store:
@@ -32,15 +36,30 @@ class PostStoreTests(unittest.TestCase):
                 self.assertEqual(store.upsert([second]), (0, 1))
                 self.assertEqual(store.count(), 1)
                 row = store.connection.execute(
-                    "SELECT text, first_seen_at, last_seen_at FROM raw_posts"
+                    """SELECT text, first_seen_at, last_seen_at,
+                              reaction_count, comment_count
+                       FROM raw_posts"""
                 ).fetchone()
+                snapshots = store.connection.execute(
+                    """SELECT observed_at, reaction_count, comment_count
+                       FROM engagement_snapshots ORDER BY observed_at"""
+                ).fetchall()
         self.assertEqual(
             row,
             (
                 "A room is available (edited)",
                 "2026-09-16T10:00:00+00:00",
                 "2026-09-16T11:00:00+00:00",
+                9,
+                5,
             ),
+        )
+        self.assertEqual(
+            snapshots,
+            [
+                ("2026-09-16T10:00:00+00:00", 4, 2),
+                ("2026-09-16T11:00:00+00:00", 9, 5),
+            ],
         )
 
 

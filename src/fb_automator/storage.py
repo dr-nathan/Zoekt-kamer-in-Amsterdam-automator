@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS raw_posts (
     post_url TEXT,
     text TEXT NOT NULL,
     published_label TEXT,
+    reaction_count INTEGER,
+    comment_count INTEGER,
     first_seen_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
     raw_json TEXT NOT NULL
@@ -25,6 +27,17 @@ CREATE INDEX IF NOT EXISTS idx_raw_posts_group
     ON raw_posts (group_url, last_seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_raw_posts_post_id
     ON raw_posts (post_id);
+
+CREATE TABLE IF NOT EXISTS engagement_snapshots (
+    raw_post_key TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    reaction_count INTEGER,
+    comment_count INTEGER,
+    PRIMARY KEY (raw_post_key, observed_at),
+    FOREIGN KEY (raw_post_key) REFERENCES raw_posts(dedupe_key) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_engagement_snapshots_post
+    ON engagement_snapshots (raw_post_key, observed_at DESC);
 
 CREATE TABLE IF NOT EXISTS listings (
     raw_post_key TEXT PRIMARY KEY,
@@ -80,7 +93,23 @@ class PostStore:
         self.connection.execute("PRAGMA foreign_keys=ON")
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.executescript(SCHEMA)
+        self._migrate_raw_post_columns()
         self._migrate_listing_columns()
+
+    def _migrate_raw_post_columns(self) -> None:
+        existing = {
+            row[1] for row in self.connection.execute("PRAGMA table_info(raw_posts)")
+        }
+        additions = {
+            "reaction_count": "INTEGER",
+            "comment_count": "INTEGER",
+        }
+        with self.connection:
+            for name, declaration in additions.items():
+                if name not in existing:
+                    self.connection.execute(
+                        f"ALTER TABLE raw_posts ADD COLUMN {name} {declaration}"
+                    )
 
     def _migrate_listing_columns(self) -> None:
         existing = {
@@ -121,14 +150,21 @@ class PostStore:
                     """
                     INSERT INTO raw_posts (
                         dedupe_key, group_name, group_url, post_id, post_url,
-                        text, published_label, first_seen_at, last_seen_at, raw_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        text, published_label, reaction_count, comment_count,
+                        first_seen_at, last_seen_at, raw_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(dedupe_key) DO UPDATE SET
                         group_name = excluded.group_name,
                         post_url = COALESCE(excluded.post_url, raw_posts.post_url),
                         text = excluded.text,
                         published_label = COALESCE(
                             excluded.published_label, raw_posts.published_label
+                        ),
+                        reaction_count = COALESCE(
+                            excluded.reaction_count, raw_posts.reaction_count
+                        ),
+                        comment_count = COALESCE(
+                            excluded.comment_count, raw_posts.comment_count
                         ),
                         last_seen_at = excluded.last_seen_at,
                         raw_json = excluded.raw_json
@@ -141,11 +177,30 @@ class PostStore:
                         post.post_url,
                         post.text,
                         post.published_label,
+                        post.reaction_count,
+                        post.comment_count,
                         post.scraped_at,
                         post.scraped_at,
                         json.dumps(post.as_dict(), ensure_ascii=False),
                     ),
                 )
+                if post.reaction_count is not None or post.comment_count is not None:
+                    self.connection.execute(
+                        """
+                        INSERT INTO engagement_snapshots (
+                            raw_post_key, observed_at, reaction_count, comment_count
+                        ) VALUES (?, ?, ?, ?)
+                        ON CONFLICT(raw_post_key, observed_at) DO UPDATE SET
+                            reaction_count = excluded.reaction_count,
+                            comment_count = excluded.comment_count
+                        """,
+                        (
+                            key,
+                            post.scraped_at,
+                            post.reaction_count,
+                            post.comment_count,
+                        ),
+                    )
                 if exists:
                     updated += 1
                 else:
