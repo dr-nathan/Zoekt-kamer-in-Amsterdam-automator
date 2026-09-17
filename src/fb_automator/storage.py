@@ -11,6 +11,7 @@ from fb_automator.models import RawPost
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS raw_posts (
     dedupe_key TEXT PRIMARY KEY,
+    content_hash TEXT NOT NULL DEFAULT '',
     group_name TEXT NOT NULL,
     group_url TEXT NOT NULL,
     post_id TEXT,
@@ -84,6 +85,10 @@ CREATE TABLE IF NOT EXISTS listings (
     source_hash TEXT NOT NULL DEFAULT '',
     extraction_version TEXT NOT NULL,
     extracted_at TEXT NOT NULL,
+    primary_image_position INTEGER,
+    image_quality_score INTEGER,
+    image_review_hash TEXT NOT NULL DEFAULT '',
+    image_review_version TEXT NOT NULL DEFAULT '',
     FOREIGN KEY (raw_post_key) REFERENCES raw_posts(dedupe_key) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_listings_kind_rent
@@ -97,6 +102,10 @@ def dedupe_key(post: RawPost) -> str:
     stable_value = post.post_id or post.post_url or post.text
     material = f"{post.group_url}\n{stable_value}".encode("utf-8")
     return hashlib.sha256(material).hexdigest()
+
+
+def content_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 class PostStore:
@@ -117,6 +126,7 @@ class PostStore:
         additions = {
             "reaction_count": "INTEGER",
             "comment_count": "INTEGER",
+            "content_hash": "TEXT NOT NULL DEFAULT ''",
         }
         with self.connection:
             for name, declaration in additions.items():
@@ -124,6 +134,17 @@ class PostStore:
                     self.connection.execute(
                         f"ALTER TABLE raw_posts ADD COLUMN {name} {declaration}"
                     )
+            rows = self.connection.execute(
+                "SELECT dedupe_key, text FROM raw_posts WHERE content_hash = ''"
+            ).fetchall()
+            self.connection.executemany(
+                "UPDATE raw_posts SET content_hash = ? WHERE dedupe_key = ?",
+                [(content_hash(text), key) for key, text in rows],
+            )
+            self.connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_raw_posts_content_hash "
+                "ON raw_posts (content_hash)"
+            )
 
     def _migrate_listing_columns(self) -> None:
         existing = {
@@ -135,6 +156,10 @@ class PostStore:
             "summary": "TEXT NOT NULL DEFAULT ''",
             "source_hash": "TEXT NOT NULL DEFAULT ''",
             "language_requirement": "TEXT NOT NULL DEFAULT 'unknown'",
+            "primary_image_position": "INTEGER",
+            "image_quality_score": "INTEGER",
+            "image_review_hash": "TEXT NOT NULL DEFAULT ''",
+            "image_review_version": "TEXT NOT NULL DEFAULT ''",
         }
         with self.connection:
             for name, declaration in additions.items():
@@ -152,25 +177,38 @@ class PostStore:
     def __exit__(self, *_: object) -> None:
         self.close()
 
-    def upsert(self, posts: list[RawPost]) -> tuple[int, int]:
+    def upsert(self, posts: list[RawPost]) -> tuple[int, int, dict[str, str]]:
         inserted = 0
         updated = 0
+        resolved_keys: dict[str, str] = {}
         with self.connection:
             for post in posts:
-                key = dedupe_key(post)
+                proposed_key = dedupe_key(post)
+                post_content_hash = content_hash(post.text)
+                content_match = self.connection.execute(
+                    """
+                    SELECT dedupe_key FROM raw_posts
+                    WHERE content_hash = ?
+                    ORDER BY first_seen_at
+                    LIMIT 1
+                    """,
+                    (post_content_hash,),
+                ).fetchone()
+                key = str(content_match[0]) if content_match else proposed_key
+                resolved_keys[proposed_key] = key
                 exists = self.connection.execute(
                     "SELECT 1 FROM raw_posts WHERE dedupe_key = ?", (key,)
                 ).fetchone()
                 self.connection.execute(
                     """
                     INSERT INTO raw_posts (
-                        dedupe_key, group_name, group_url, post_id, post_url,
+                        dedupe_key, content_hash, group_name, group_url, post_id, post_url,
                         text, published_label, reaction_count, comment_count,
                         first_seen_at, last_seen_at, raw_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(dedupe_key) DO UPDATE SET
-                        group_name = excluded.group_name,
-                        post_url = COALESCE(excluded.post_url, raw_posts.post_url),
+                        content_hash = excluded.content_hash,
+                        post_url = COALESCE(raw_posts.post_url, excluded.post_url),
                         text = excluded.text,
                         published_label = COALESCE(
                             excluded.published_label, raw_posts.published_label
@@ -186,6 +224,7 @@ class PostStore:
                     """,
                     (
                         key,
+                        post_content_hash,
                         post.group_name,
                         post.group_url,
                         post.post_id,
@@ -220,7 +259,7 @@ class PostStore:
                     updated += 1
                 else:
                     inserted += 1
-        return inserted, updated
+        return inserted, updated, resolved_keys
 
     def count(self) -> int:
         row = self.connection.execute("SELECT COUNT(*) FROM raw_posts").fetchone()
@@ -292,6 +331,71 @@ class PostStore:
             }
             for key, text, last_seen_at, source_hash, extraction_version in rows
         ]
+
+    def listings_for_image_review(self) -> list[dict[str, object]]:
+        listings = self.connection.execute(
+            """
+            SELECT raw_post_key, summary, image_review_hash, image_review_version
+            FROM listings
+            WHERE listing_kind = 'offer'
+            ORDER BY extracted_at DESC
+            """
+        ).fetchall()
+        results: list[dict[str, object]] = []
+        for key, summary, review_hash, review_version in listings:
+            images = self.connection.execute(
+                """
+                SELECT position, local_path, content_type
+                FROM post_images
+                WHERE raw_post_key = ? AND local_path IS NOT NULL
+                ORDER BY position
+                """,
+                (key,),
+            ).fetchall()
+            if images:
+                results.append(
+                    {
+                        "raw_post_key": str(key),
+                        "summary": str(summary),
+                        "image_review_hash": str(review_hash or ""),
+                        "image_review_version": str(review_version or ""),
+                        "images": [
+                            {
+                                "position": int(position),
+                                "local_path": str(local_path),
+                                "content_type": str(content_type or "image/jpeg"),
+                            }
+                            for position, local_path, content_type in images
+                        ],
+                    }
+                )
+        return results
+
+    def update_image_review(
+        self,
+        *,
+        raw_post_key: str,
+        primary_image_position: int | None,
+        image_quality_score: int,
+        image_review_hash: str,
+        image_review_version: str,
+    ) -> None:
+        with self.connection:
+            self.connection.execute(
+                """
+                UPDATE listings
+                SET primary_image_position = ?, image_quality_score = ?,
+                    image_review_hash = ?, image_review_version = ?
+                WHERE raw_post_key = ?
+                """,
+                (
+                    primary_image_position,
+                    image_quality_score,
+                    image_review_hash,
+                    image_review_version,
+                    raw_post_key,
+                ),
+            )
 
     def upsert_listings(self, listings: list[ListingAttributes]) -> None:
         columns = (

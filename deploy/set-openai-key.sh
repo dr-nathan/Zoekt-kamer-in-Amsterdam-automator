@@ -14,7 +14,7 @@ fi
 
 umask 077
 temporary_file=$(mktemp "$APP_DIR/.env.XXXXXX")
-printf 'OPENAI_API_KEY=%s\nOPENAI_MODEL=gpt-5-nano\n' "$api_key" > "$temporary_file"
+printf 'OPENAI_API_KEY=%s\nOPENAI_MODEL=gpt-5.4-mini\nOPENAI_VISION_MODEL=gpt-5.4-mini\n' "$api_key" > "$temporary_file"
 mv "$temporary_file" "$ENV_FILE"
 unset api_key
 

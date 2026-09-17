@@ -207,8 +207,10 @@ class FacebookCollector:
                 self._guard_access(page)
                 self._wait_for_feed(page)
                 posts = self._collect_group(page, group, max_posts, max_scrolls)
-                inserted, updated = store.upsert(posts)
-                image_count = self._download_images(context, posts, store)
+                inserted, updated, resolved_keys = store.upsert(posts)
+                image_count = self._download_images(
+                    context, posts, store, resolved_keys
+                )
                 print(
                     f"  found={len(posts)} new={inserted} refreshed={updated} "
                     f"images={image_count} database_total={store.count()}"
@@ -427,11 +429,16 @@ class FacebookCollector:
         return posts
 
     def _download_images(
-        self, context: BrowserContext, posts: list[RawPost], store: PostStore
+        self,
+        context: BrowserContext,
+        posts: list[RawPost],
+        store: PostStore,
+        resolved_keys: dict[str, str],
     ) -> int:
         downloaded = 0
         for post in posts:
-            raw_post_key = dedupe_key(post)
+            proposed_key = dedupe_key(post)
+            raw_post_key = resolved_keys.get(proposed_key, proposed_key)
             for position, source_url in enumerate(
                 post.image_urls[:MAX_IMAGES_PER_POST]
             ):

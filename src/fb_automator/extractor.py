@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -14,8 +15,8 @@ from fb_automator.listing_models import (
 )
 from fb_automator.storage import PostStore
 
-DEFAULT_MODEL = "gpt-5-nano"
-EXTRACTION_VERSION = "llm-v3-lausanne"
+DEFAULT_MODEL = "gpt-5.4-mini"
+EXTRACTION_VERSION = "llm-v4-lausanne"
 
 LAUSANNE_NEIGHBORHOODS = "\n".join(
     f"- {neighborhood.value}" for neighborhood in LausanneNeighborhood
@@ -160,48 +161,65 @@ def extract_database(
             or row["extraction_version"] != version
         ]
         cached = len(rows) - len(uncached)
-        pending = uncached
-        if limit is not None:
-            pending = pending[:limit]
-        remaining = len(uncached) - len(pending)
-        if not pending:
+        grouped: dict[str, list[dict[str, str | None]]] = {}
+        for row in uncached:
+            grouped.setdefault(_source_hash(str(row["text"])), []).append(row)
+        groups = list(grouped.values())
+        pending_groups = groups if limit is None else groups[:limit]
+        remaining = sum(len(group) for group in groups[len(pending_groups):])
+        if not pending_groups:
             return 0, cached, remaining, store.listing_count()
 
         extractor = LLMListingExtractor(model=selected_model, client=client)
 
-        def extract_row(row: dict[str, str | None]) -> ListingAttributes:
-            return extractor.extract(
-                str(row["dedupe_key"]), str(row["text"]), str(row["last_seen_at"])
+        def extract_group(
+            group: list[dict[str, str | None]],
+        ) -> list[ListingAttributes]:
+            representative = group[0]
+            listing = extractor.extract(
+                str(representative["dedupe_key"]),
+                str(representative["text"]),
+                str(representative["last_seen_at"]),
             )
+            return [
+                replace(listing, raw_post_key=str(row["dedupe_key"]))
+                for row in group
+            ]
 
         if workers == 1:
-            for index, row in enumerate(pending, start=1):
+            for index, group in enumerate(pending_groups, start=1):
                 try:
-                    listing = extract_row(row)
+                    listings = extract_group(group)
                 except Exception as exc:
                     raise RuntimeError(
-                        f"LLM extraction failed at item {index} of {len(pending)}: {exc}"
+                        "LLM extraction failed at unique post "
+                        f"{index} of {len(pending_groups)}: {exc}"
                     ) from exc
-                store.upsert_listings([listing])
+                store.upsert_listings(listings)
                 if progress:
-                    progress(index, len(pending))
+                    progress(index, len(pending_groups))
         else:
             completed = 0
             with ThreadPoolExecutor(max_workers=workers) as executor:
-                futures = [executor.submit(extract_row, row) for row in pending]
+                futures = [
+                    executor.submit(extract_group, group)
+                    for group in pending_groups
+                ]
                 for future in as_completed(futures):
                     completed += 1
                     try:
-                        listing = future.result()
+                        listings = future.result()
                     except Exception as exc:
                         for pending_future in futures:
                             pending_future.cancel()
                         raise RuntimeError(
                             "LLM extraction failed after "
-                            f"{completed - 1} of {len(pending)} completed: {exc}"
+                            f"{completed - 1} of {len(pending_groups)} unique posts "
+                            f"completed: {exc}"
                         ) from exc
-                    store.upsert_listings([listing])
+                    store.upsert_listings(listings)
                     if progress:
-                        progress(completed, len(pending))
+                        progress(completed, len(pending_groups))
 
-        return len(pending), cached, remaining, store.listing_count()
+        processed = sum(len(group) for group in pending_groups)
+        return processed, cached, remaining, store.listing_count()

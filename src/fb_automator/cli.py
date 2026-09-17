@@ -6,6 +6,7 @@ from pathlib import Path
 from fb_automator.collector import FacebookCollector
 from fb_automator.config import load_groups
 from fb_automator.extractor import extract_database
+from fb_automator.image_reviewer import review_database_images
 
 DEFAULT_PROFILE = Path(".state/facebook-profile")
 DEFAULT_DATABASE = Path("data/listings.db")
@@ -48,7 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     extract.add_argument(
         "--model",
-        help="OpenAI model (default: OPENAI_MODEL or gpt-5-nano).",
+        help="OpenAI model (default: OPENAI_MODEL or gpt-5.4-mini).",
     )
     extract.add_argument(
         "--force",
@@ -61,6 +62,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=4,
         help="Concurrent API requests (default: 4).",
+    )
+    extract.add_argument(
+        "--vision-model",
+        help="Image-review model (default: OPENAI_VISION_MODEL or gpt-5.4-mini).",
+    )
+    extract.add_argument(
+        "--skip-image-review",
+        action="store_true",
+        help="Skip cached cover-image selection after text extraction.",
     )
 
     serve = subparsers.add_parser(
@@ -105,6 +115,25 @@ def main() -> None:
             f"extracted={processed} cached={cached} "
             f"pending={remaining} database_total={total}"
         )
+        if not args.skip_image_review:
+            try:
+                reviewed, image_cached, image_remaining, image_total = (
+                    review_database_images(
+                        args.database,
+                        model=args.vision_model,
+                        limit=args.limit,
+                        workers=args.workers,
+                        progress=lambda done, count: print(
+                            f"reviewing images {done}/{count}"
+                        ),
+                    )
+                )
+            except (RuntimeError, ValueError) as exc:
+                raise SystemExit(f"error: image review failed: {exc}") from exc
+            print(
+                f"images_reviewed={reviewed} image_cached={image_cached} "
+                f"image_pending={image_remaining} image_total={image_total}"
+            )
         return
 
     collector = FacebookCollector(

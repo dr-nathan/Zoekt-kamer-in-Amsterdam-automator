@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 from fb_automator.models import RawPost
-from fb_automator.storage import PostStore
+from fb_automator.storage import PostStore, dedupe_key
 
 
 class PostStoreTests(unittest.TestCase):
@@ -32,8 +32,8 @@ class PostStoreTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as directory:
             with PostStore(Path(directory) / "posts.db") as store:
-                self.assertEqual(store.upsert([first]), (1, 0))
-                self.assertEqual(store.upsert([second]), (0, 1))
+                self.assertEqual(store.upsert([first])[:2], (1, 0))
+                self.assertEqual(store.upsert([second])[:2], (0, 1))
                 self.assertEqual(store.count(), 1)
                 row = store.connection.execute(
                     """SELECT text, first_seen_at, last_seen_at,
@@ -83,6 +83,37 @@ class PostStoreTests(unittest.TestCase):
                 "image/jpeg",
             ),
         )
+
+    def test_upsert_merges_exact_cross_post_content(self) -> None:
+        first = RawPost(
+            group_name="Group one",
+            group_url="https://www.facebook.com/groups/1/",
+            post_id="101",
+            post_url="https://www.facebook.com/groups/1/posts/101",
+            text="Chambre à Lausanne, CHF 900.",
+            published_label=None,
+            scraped_at="2026-09-17T10:00:00+00:00",
+        )
+        cross_post = RawPost(
+            group_name="Group two",
+            group_url="https://www.facebook.com/groups/2/",
+            post_id="202",
+            post_url="https://www.facebook.com/groups/2/posts/202",
+            text=first.text,
+            published_label=None,
+            scraped_at="2026-09-17T11:00:00+00:00",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            with PostStore(Path(directory) / "posts.db") as store:
+                first_result = store.upsert([first])
+                second_result = store.upsert([cross_post])
+                self.assertEqual(first_result[:2], (1, 0))
+                self.assertEqual(second_result[:2], (0, 1))
+                self.assertEqual(store.count(), 1)
+                self.assertEqual(
+                    second_result[2][dedupe_key(cross_post)],
+                    dedupe_key(first),
+                )
 
 
 if __name__ == "__main__":

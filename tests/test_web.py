@@ -94,6 +94,52 @@ class ListingRepositoryTests(unittest.TestCase):
         results = ListingRepository(self.database).search(ListingSearch(max_rent=700))
         self.assertEqual(results, [])
 
+    def test_exact_cross_posts_are_shown_once(self) -> None:
+        connection = sqlite3.connect(self.database)
+        connection.execute(
+            """
+            INSERT INTO raw_posts (
+                dedupe_key, group_name, group_url, post_id, post_url, text,
+                published_label, reaction_count, comment_count, first_seen_at,
+                last_seen_at, raw_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "duplicate", "Second Lausanne group",
+                "https://facebook.com/groups/second", "84",
+                "https://facebook.com/groups/second/posts/84", "same cross-post",
+                "Today", 15, 6, "2026-09-17T09:00:00+00:00",
+                "2026-09-17T11:00:00+00:00", "{}",
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO listings (
+                raw_post_key, listing_kind, monthly_rent, utilities,
+                deposit_amount, deposit_months, room_size_m2, property_size_m2,
+                location_text, city, neighborhood, available_from, available_to,
+                lease_type, registration, furnishing, gender, age_min, age_max,
+                language_requirement, internationals, applicant_status,
+                private_bathroom, amenities_json, particularities_json, summary,
+                evidence_json, source_hash, extraction_version, extracted_at
+            )
+            SELECT ?, listing_kind, monthly_rent, utilities,
+                   deposit_amount, deposit_months, room_size_m2, property_size_m2,
+                   location_text, city, neighborhood, available_from, available_to,
+                   lease_type, registration, furnishing, gender, age_min, age_max,
+                   language_requirement, internationals, applicant_status,
+                   private_bathroom, amenities_json, particularities_json, summary,
+                   evidence_json, source_hash, extraction_version, extracted_at
+            FROM listings WHERE raw_post_key = ?
+            """,
+            ("duplicate", "abc123"),
+        )
+        connection.commit()
+        connection.close()
+
+        results = ListingRepository(self.database).search(ListingSearch())
+        self.assertEqual(len(results), 1)
+
     def test_app_exposes_home_health_and_static_routes(self) -> None:
         paths = {getattr(route, "path", None) for route in create_app(self.database).routes}
         self.assertTrue({"/", "/health", "/static"}.issubset(paths))

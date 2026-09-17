@@ -34,6 +34,7 @@ class ListingSearch:
 @dataclass(frozen=True, slots=True)
 class ListingCard:
     key: str
+    source_hash: str
     location: str
     neighborhood: str | None
     monthly_rent: float | None
@@ -55,6 +56,8 @@ class ListingCard:
     comment_count: int | None
     accent: int
     image_url: str | None
+    image_urls: tuple[str, ...]
+    image_quality_score: int | None
 
     @property
     def rent_label(self) -> str:
@@ -146,7 +149,7 @@ class ListingRepository:
             ),
         }.get(filters.sort, "r.last_seen_at DESC")
 
-        image_expression = "NULL AS image_path"
+        image_expression = "NULL AS image_paths_json"
         try:
             probe = sqlite3.connect(
                 f"file:{self.database.resolve()}?mode=ro", uri=True
@@ -157,19 +160,27 @@ class ListingRepository:
             probe.close()
             if has_images:
                 image_expression = """
-                    (SELECT pi.local_path FROM post_images AS pi
-                     WHERE pi.raw_post_key = l.raw_post_key
-                       AND pi.local_path IS NOT NULL
-                     ORDER BY pi.position LIMIT 1) AS image_path
+                    (SELECT json_group_array(
+                         json_object('position', ordered.position, 'path', ordered.local_path)
+                     )
+                     FROM (
+                         SELECT pi.position, pi.local_path
+                         FROM post_images AS pi
+                         WHERE pi.raw_post_key = l.raw_post_key
+                           AND pi.local_path IS NOT NULL
+                         ORDER BY pi.position
+                     ) AS ordered) AS image_paths_json
                 """
         except sqlite3.Error:
             pass
 
         query = f"""
-            SELECT l.raw_post_key, l.monthly_rent, l.utilities, l.room_size_m2,
+            SELECT l.raw_post_key, l.source_hash, l.monthly_rent, l.utilities, l.room_size_m2,
                    l.location_text, l.city, l.neighborhood, l.available_from,
                    l.available_to, l.lease_type, l.registration, l.furnishing,
                    l.amenities_json, l.particularities_json, l.summary,
+                   l.primary_image_position, l.image_quality_score,
+                   l.image_review_version,
                    r.post_url, r.group_name, r.published_label, r.last_seen_at,
                    r.reaction_count, r.comment_count, {image_expression}
             FROM listings AS l
@@ -178,7 +189,7 @@ class ListingRepository:
             ORDER BY {ordering}
             LIMIT ?
         """
-        params.append(limit)
+        params.append(limit * 4)
         try:
             connection = sqlite3.connect(
                 f"file:{self.database.resolve()}?mode=ro", uri=True
@@ -190,13 +201,58 @@ class ListingRepository:
         finally:
             if "connection" in locals():
                 connection.close()
-        return [self._to_card(row) for row in rows]
+        ordered_hashes: list[str] = []
+        best_rows: dict[str, sqlite3.Row] = {}
+        for row in rows:
+            source_hash = row["source_hash"] or row["raw_post_key"]
+            current = best_rows.get(source_hash)
+            if current is None:
+                ordered_hashes.append(source_hash)
+                best_rows[source_hash] = row
+                continue
+            candidate_score = (
+                row["image_quality_score"] or 0,
+                len(_json_image_paths(row["image_paths_json"])),
+                (row["reaction_count"] or 0) + 2 * (row["comment_count"] or 0),
+            )
+            current_score = (
+                current["image_quality_score"] or 0,
+                len(_json_image_paths(current["image_paths_json"])),
+                (current["reaction_count"] or 0)
+                + 2 * (current["comment_count"] or 0),
+            )
+            if candidate_score > current_score:
+                best_rows[source_hash] = row
+        return [self._to_card(best_rows[key]) for key in ordered_hashes[:limit]]
 
     def _to_card(self, row: sqlite3.Row) -> ListingCard:
         location = row["location_text"] or row["neighborhood"] or row["city"] or "Lausanne"
         key = row["raw_post_key"]
+        image_records = tuple(
+            (position, url)
+            for position, path in _json_image_paths(row["image_paths_json"])
+            if (url := self._media_url(path)) is not None
+        )
+        primary_position = row["primary_image_position"]
+        reviewed = bool(row["image_review_version"])
+        if primary_position is not None and any(
+            position == primary_position for position, _ in image_records
+        ):
+            images = tuple(
+                url for position, url in image_records if position == primary_position
+            ) + tuple(
+                url for position, url in image_records if position != primary_position
+            )
+            cover = images[0]
+        elif reviewed:
+            images = tuple(url for _, url in image_records)
+            cover = None
+        else:
+            images = tuple(url for _, url in image_records)
+            cover = images[0] if images else None
         return ListingCard(
             key=key,
+            source_hash=row["source_hash"] or key,
             location=location,
             neighborhood=row["neighborhood"],
             monthly_rent=row["monthly_rent"],
@@ -217,7 +273,9 @@ class ListingRepository:
             reaction_count=row["reaction_count"],
             comment_count=row["comment_count"],
             accent=int(hashlib.sha256(key.encode()).hexdigest()[:2], 16) % 5,
-            image_url=self._media_url(row["image_path"]),
+            image_url=cover,
+            image_urls=images,
+            image_quality_score=row["image_quality_score"],
         )
 
     def _media_url(self, local_path: str | None) -> str | None:
@@ -335,6 +393,24 @@ def _json_strings(value: str | None) -> tuple[str, ...]:
     except (json.JSONDecodeError, TypeError):
         return ()
     return tuple(str(item) for item in parsed if isinstance(item, str))
+
+
+def _json_image_paths(value: str | None) -> tuple[tuple[int, str], ...]:
+    if not value:
+        return ()
+    try:
+        parsed = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return ()
+    records: list[tuple[int, str]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        position = item.get("position")
+        path = item.get("path")
+        if isinstance(position, int) and isinstance(path, str):
+            records.append((position, path))
+    return tuple(records)
 
 
 def _safe_url(value: str | None) -> str | None:
