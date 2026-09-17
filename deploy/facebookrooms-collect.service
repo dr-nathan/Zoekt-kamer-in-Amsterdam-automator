@@ -1,5 +1,5 @@
 [Unit]
-Description=Collect and extract Facebook room listings
+Description=Collect and extract Lausanne housing listings
 After=network-online.target
 Wants=network-online.target
 

@@ -1,11 +1,11 @@
-# Amsterdam Facebook housing collector
+# Chineur2000 · collecteur de logements lausannois
 
 This experimental branch is rebuilding the original script as a private pipeline:
 
 1. Open Facebook in a real, visible Chromium browser.
 2. Reuse a locally saved login session to read configured housing groups.
 3. Store recent posts in a deduplicated SQLite database.
-4. Later, extract structured housing attributes and expose them in a private web UI.
+4. Extract structured housing attributes and expose them in the private Chineur2000 web UI.
 
 The collector does not store a Facebook password. Browser session data stays under `.state/`,
 which is excluded from Git. The database and collected posts stay under `data/`, also excluded
@@ -76,9 +76,10 @@ fb-housing extract
 ```
 
 The extractor sends each pending post to the OpenAI Responses API with Structured Outputs and
-writes the validated result to the normalized `listings` table. It extracts price, size, location,
+writes the validated result to the normalized `listings` table. It extracts price in CHF, size, location,
 availability, registration, contract, furnishing, applicant requirements, amenities, a short
-summary, and concise Particularities labels. Every material field keeps a supporting quote and
+French summary, and concise French Particularities labels. Locations are normalized by the model
+to Lausanne's official statistical neighborhoods. Every material field keeps a supporting quote and
 confidence score. Raw captured posts remain unchanged.
 
 The default model is `gpt-5-nano`. Override it with `OPENAI_MODEL` or `--model`. Results are cached
@@ -99,7 +100,7 @@ Run the unit tests with:
 python -m unittest discover -s tests
 ```
 
-## Browse the rooms
+## Browse the listings
 
 Start the private web interface after collecting and extracting posts:
 
@@ -107,8 +108,8 @@ Start the private web interface after collecting and extracting posts:
 fb-housing serve
 ```
 
-Open `http://127.0.0.1:8000`. The interface reads the same SQLite database and offers filters for
-area, maximum rent, minimum room size, registration and extracted particularities. Results can be
+Open `http://127.0.0.1:8000`. The French interface reads the same SQLite database and offers filters
+for official Lausanne neighborhood, maximum rent, minimum room size, registration and extracted particularities. Results can be
 sorted by collection time, price or Facebook engagement. The website never shows raw post text and
 links back to Facebook for the original context.
 
@@ -141,10 +142,10 @@ This project is for a single user's private browsing interface. Do not publish s
 raw private-group content. The later UI should minimize stored personal data and link back to the
 original Facebook post.
 
-## Legacy prototype
+## Legacy Amsterdam prototype
 
 ### Description
-The goal of this code is as follows:
+The original, superseded goal of this code was as follows:
 
 1. Scrape pre-determined Facebook groups for room listings in Amsterdam (currently, Zoekt Kamer in Amsterdam Community).
 

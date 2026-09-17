@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS listings (
     gender TEXT NOT NULL,
     age_min INTEGER,
     age_max INTEGER,
-    dutch_requirement TEXT NOT NULL,
+    language_requirement TEXT NOT NULL,
     internationals TEXT NOT NULL,
     applicant_status TEXT NOT NULL,
     private_bathroom INTEGER,
@@ -134,6 +134,7 @@ class PostStore:
             "neighborhood": "TEXT",
             "summary": "TEXT NOT NULL DEFAULT ''",
             "source_hash": "TEXT NOT NULL DEFAULT ''",
+            "language_requirement": "TEXT NOT NULL DEFAULT 'unknown'",
         }
         with self.connection:
             for name, declaration in additions.items():
@@ -299,7 +300,7 @@ class PostStore:
             "location_text", "city", "neighborhood", "available_from",
             "available_to", "lease_type",
             "registration", "furnishing", "gender", "age_min", "age_max",
-            "dutch_requirement", "internationals", "applicant_status",
+            "language_requirement", "internationals", "applicant_status",
             "private_bathroom", "amenities_json", "particularities_json",
             "summary", "evidence_json", "source_hash", "extraction_version",
             "extracted_at",
@@ -324,7 +325,7 @@ class PostStore:
                 item.property_size_m2,
                 item.location_text,
                 item.city,
-                item.neighborhood,
+                item.neighborhood.value if item.neighborhood is not None else None,
                 item.available_from,
                 item.available_to,
                 item.lease_type.value,
@@ -333,7 +334,7 @@ class PostStore:
                 item.gender.value,
                 item.age_min,
                 item.age_max,
-                item.dutch_requirement.value,
+                item.language_requirement.value,
                 item.internationals.value,
                 item.applicant_status.value,
                 None if item.private_bathroom is None else int(item.private_bathroom),

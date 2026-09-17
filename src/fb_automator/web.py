@@ -15,6 +15,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from fb_automator.listing_models import LausanneNeighborhood
+
 DEFAULT_DATABASE = Path("data/listings.db")
 ASSET_ROOT = Path(__file__).parent / "web_assets"
 
@@ -57,46 +59,48 @@ class ListingCard:
     @property
     def rent_label(self) -> str:
         if self.monthly_rent is None:
-            return "Price on request"
-        amount = f"{self.monthly_rent:,.0f}".replace(",", ".")
-        return f"€{amount} / month"
+            return "Loyer non précisé"
+        amount = f"{self.monthly_rent:,.0f}".replace(",", "’")
+        return f"CHF {amount} / mois"
 
     @property
     def size_label(self) -> str:
         if self.room_size_m2 is None:
-            return "Size unknown"
-        return f"{self.room_size_m2:g} m² room"
+            return "Surface non précisée"
+        return f"Chambre de {self.room_size_m2:g} m²"
 
     @property
     def availability_label(self) -> str:
         if not self.available_from:
-            return "Availability unknown"
+            return "Disponibilité non précisée"
         start = _display_date(self.available_from)
         if self.available_to:
             return f"{start} – {_display_date(self.available_to)}"
-        return f"From {start}"
+        return f"Dès le {start}"
 
     @property
     def engagement_label(self) -> str | None:
         parts: list[str] = []
         if self.reaction_count is not None:
-            parts.append(f"{self.reaction_count} reaction{'s' if self.reaction_count != 1 else ''}")
+            suffix = "réaction" if self.reaction_count == 1 else "réactions"
+            parts.append(f"{self.reaction_count} {suffix}")
         if self.comment_count is not None:
-            parts.append(f"{self.comment_count} comment{'s' if self.comment_count != 1 else ''}")
+            suffix = "commentaire" if self.comment_count == 1 else "commentaires"
+            parts.append(f"{self.comment_count} {suffix}")
         return " · ".join(parts) or None
 
     @property
     def posted_label(self) -> str:
         parsed = _parse_datetime(self.last_seen_at)
         if parsed is None:
-            return "Recently collected"
+            return "Collectée récemment"
         now = datetime.now(timezone.utc)
         days = max(0, (now.date() - parsed.date()).days)
         if days == 0:
-            return "Collected today"
+            return "Collectée aujourd’hui"
         if days == 1:
-            return "Collected yesterday"
-        return f"Collected {days} days ago"
+            return "Collectée hier"
+        return f"Collectée il y a {days} jours"
 
     @property
     def is_new(self) -> bool:
@@ -117,11 +121,8 @@ class ListingRepository:
         clauses = ["l.listing_kind = 'offer'"]
         params: list[Any] = []
         if filters.area:
-            clauses.append(
-                "lower(COALESCE(l.neighborhood, '') || ' ' || "
-                "COALESCE(l.location_text, '') || ' ' || COALESCE(l.city, '')) LIKE ?"
-            )
-            params.append(f"%{filters.area.lower()}%")
+            clauses.append("l.neighborhood = ?")
+            params.append(filters.area)
         if filters.max_rent is not None:
             clauses.append("l.monthly_rent IS NOT NULL AND l.monthly_rent <= ?")
             params.append(filters.max_rent)
@@ -192,7 +193,7 @@ class ListingRepository:
         return [self._to_card(row) for row in rows]
 
     def _to_card(self, row: sqlite3.Row) -> ListingCard:
-        location = row["location_text"] or row["neighborhood"] or row["city"] or "Amsterdam"
+        location = row["location_text"] or row["neighborhood"] or row["city"] or "Lausanne"
         key = row["raw_post_key"]
         return ListingCard(
             key=key,
@@ -262,8 +263,8 @@ def create_app(database: Path | None = None) -> FastAPI:
     )
 
     application = FastAPI(
-        title="Room Radar",
-        description="Private browser for structured Facebook housing posts.",
+        title="Chineur2000",
+        description="Flux privé d’annonces de logement autour de Lausanne.",
         docs_url=None,
         redoc_url=None,
     )
@@ -302,6 +303,7 @@ def create_app(database: Path | None = None) -> FastAPI:
                 listings=cards,
                 filters=filters,
                 particularities=repository.particularities(),
+                neighborhoods=[item.value for item in LausanneNeighborhood],
                 active_filter_count=sum(
                     [
                         bool(filters.area),
@@ -349,7 +351,11 @@ def _display_date(value: str) -> str:
         parsed = date.fromisoformat(value)
     except ValueError:
         return value
-    return parsed.strftime("%d %b").lstrip("0")
+    months = (
+        "janv.", "févr.", "mars", "avr.", "mai", "juin",
+        "juil.", "août", "sept.", "oct.", "nov.", "déc.",
+    )
+    return f"{parsed.day} {months[parsed.month - 1]}"
 
 
 def _parse_datetime(value: str) -> datetime | None:

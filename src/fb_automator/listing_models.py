@@ -57,6 +57,30 @@ class RequirementLevel(StrEnum):
     UNKNOWN = "unknown"
 
 
+class LausanneNeighborhood(StrEnum):
+    """Official statistical neighborhoods used by the City of Lausanne."""
+
+    CENTRE = "Centre"
+    MAUPAS_VALENCY = "Maupas / Valency"
+    SEBEILLON_MALLEY = "Sébeillon / Malley"
+    MONTOIE_BOURDONNETTE = "Montoie / Bourdonnette"
+    MONTRIOND_COUR = "Montriond / Cour"
+    SOUS_GARE_OUCHY = "Sous-Gare / Ouchy"
+    MONTCHOISI = "Montchoisi"
+    FLORIMONT_CHISSIEZ = "Florimont / Chissiez"
+    MOUSQUINES_BELLEVUE = "Mousquines / Bellevue"
+    VALLON_BETHUSY = "Vallon / Béthusy"
+    CHAILLY_ROVEREAZ = "Chailly / Rovéréaz"
+    SALLAZ_VENNES_SECHAUD = "Sallaz / Vennes / Séchaud"
+    SAUVABELIN = "Sauvabelin"
+    BORDE_BELLEVAUX = "Borde / Bellevaux"
+    VINET_PONTAISE = "Vinet / Pontaise"
+    BOSSONS_BLECHERETTE = "Bossons / Blécherette"
+    BEAULIEU_GREY_BOISY = "Beaulieu / Grey / Boisy"
+    ZONES_FORAINES = "Zones foraines"
+    OUTSIDE_LAUSANNE = "Hors Lausanne"
+
+
 class InternationalStatus(StrEnum):
     WELCOME = "welcome"
     EXCLUDED = "excluded"
@@ -92,7 +116,7 @@ class EvidenceField(StrEnum):
     FURNISHING = "furnishing"
     GENDER = "gender"
     AGE = "age"
-    DUTCH_REQUIREMENT = "dutch_requirement"
+    LANGUAGE_REQUIREMENT = "language_requirement"
     INTERNATIONALS = "internationals"
     APPLICANT_STATUS = "applicant_status"
     PRIVATE_BATHROOM = "private_bathroom"
@@ -125,18 +149,23 @@ class ExtractedListing(BaseModel):
         )
     )
     monthly_rent: float | None = Field(
-        ge=0, description="Monthly rent in euros, excluding deposits."
+        ge=0, description="Monthly rent in Swiss francs, excluding deposits."
     )
     utilities: UtilitiesStatus
     deposit_amount: float | None = Field(
-        ge=0, description="Deposit in euros, if explicitly stated."
+        ge=0, description="Deposit in Swiss francs, if explicitly stated."
     )
     deposit_months: float | None = Field(ge=0)
     room_size_m2: float | None = Field(ge=0)
     property_size_m2: float | None = Field(ge=0)
     location_text: str | None = Field(description="Most useful stated location for display.")
     city: str | None
-    neighborhood: str | None
+    neighborhood: LausanneNeighborhood | None = Field(
+        description=(
+            "Official Lausanne statistical neighborhood, Hors Lausanne when clearly outside "
+            "the municipality, or null when it cannot be established from the post."
+        )
+    )
     available_from: str | None = Field(description="ISO date YYYY-MM-DD, or null.")
     available_to: str | None = Field(description="ISO date YYYY-MM-DD, or null.")
     lease_type: LeaseType
@@ -145,11 +174,11 @@ class ExtractedListing(BaseModel):
     gender: GenderRequirement
     age_min: int | None = Field(ge=0, le=120)
     age_max: int | None = Field(ge=0, le=120)
-    dutch_requirement: RequirementLevel
+    language_requirement: RequirementLevel
     internationals: InternationalStatus
     applicant_status: ApplicantStatus
     private_bathroom: bool | None
-    amenities: list[str] = Field(description="Short normalized amenity names in English.")
+    amenities: list[str] = Field(description="Short normalized amenity names in French.")
     particularities: list[str] = Field(
         description="Concise display labels for notable conditions or restrictions."
     )
@@ -187,7 +216,7 @@ class ListingAttributes:
     property_size_m2: float | None
     location_text: str | None
     city: str | None
-    neighborhood: str | None
+    neighborhood: LausanneNeighborhood | None
     available_from: str | None
     available_to: str | None
     lease_type: LeaseType
@@ -196,7 +225,7 @@ class ListingAttributes:
     gender: GenderRequirement
     age_min: int | None
     age_max: int | None
-    dutch_requirement: RequirementLevel
+    language_requirement: RequirementLevel
     internationals: InternationalStatus
     applicant_status: ApplicantStatus
     private_bathroom: bool | None

@@ -1,15 +1,15 @@
 :root {
   color-scheme: light;
-  --ink: #1c2333;
-  --muted: #687080;
-  --paper: #f7f5f0;
-  --card: #fffefb;
-  --line: #dedbd2;
-  --plum: #572c55;
-  --plum-dark: #3f1d3e;
-  --apricot: #f5a66b;
-  --mint: #b9dbc9;
-  --shadow: 0 18px 45px rgba(38, 32, 46, 0.1);
+  --ink: #241b1d;
+  --muted: #73686a;
+  --paper: #f7f3f2;
+  --card: #fffdfc;
+  --line: #e2d8d8;
+  --rouge: #c51625;
+  --rouge-fonce: #8e0d18;
+  --rouge-tendre: #f7e3e5;
+  --or: #e9a23b;
+  --shadow: 0 18px 45px rgba(91, 18, 27, 0.11);
 }
 
 * { box-sizing: border-box; }
@@ -20,7 +20,7 @@ body {
   margin: 0;
   min-width: 320px;
   background:
-    radial-gradient(circle at 84% 6%, rgba(245, 166, 107, 0.2), transparent 26rem),
+    radial-gradient(circle at 84% 6%, rgba(197, 22, 37, 0.14), transparent 27rem),
     var(--paper);
   color: var(--ink);
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -41,8 +41,8 @@ button, input, select { font: inherit; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid rgba(87, 44, 85, 0.12);
-  background: rgba(247, 245, 240, 0.82);
+  border-bottom: 1px solid rgba(142, 13, 24, 0.12);
+  background: rgba(247, 243, 242, 0.88);
   backdrop-filter: blur(18px);
   position: sticky;
   top: 0;
@@ -60,29 +60,20 @@ button, input, select { font: inherit; }
   letter-spacing: -0.04em;
 }
 
-.brand > span:last-child > span { color: var(--plum); }
+.brand > span:last-child > span { color: var(--rouge); }
 
 .brand-mark {
   width: 34px;
   height: 34px;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  align-items: end;
-  gap: 3px;
-  padding: 8px;
-  border-radius: 50%;
-  background: var(--plum);
+  place-items: center;
+  border-radius: 9px 50% 50% 50%;
+  background: var(--rouge);
+  color: #fff;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.2rem;
+  font-weight: 800;
 }
-
-.brand-mark i {
-  display: block;
-  border-radius: 4px 4px 1px 1px;
-  background: #fff;
-}
-
-.brand-mark i:nth-child(1) { height: 7px; opacity: 0.6; }
-.brand-mark i:nth-child(2) { height: 13px; }
-.brand-mark i:nth-child(3) { height: 10px; opacity: 0.78; }
 
 .header-meta {
   display: flex;
@@ -98,13 +89,13 @@ button, input, select { font: inherit; }
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #43a376;
-  box-shadow: 0 0 0 4px rgba(67, 163, 118, 0.13);
+  background: var(--rouge);
+  box-shadow: 0 0 0 4px rgba(197, 22, 37, 0.13);
 }
 
 .intro {
-  min-height: 260px;
-  padding-block: 50px 38px;
+  min-height: 235px;
+  padding-block: 44px 34px;
   display: grid;
   grid-template-columns: 1.45fr 0.7fr;
   align-items: end;
@@ -113,7 +104,7 @@ button, input, select { font: inherit; }
 
 .eyebrow {
   margin: 0 0 10px;
-  color: var(--plum);
+  color: var(--rouge);
   font-size: 0.72rem;
   font-weight: 800;
   letter-spacing: 0.13em;
@@ -148,7 +139,7 @@ h1 {
   align-items: end;
   gap: 1px;
   padding: 8px;
-  border: 1px solid rgba(87, 44, 85, 0.12);
+  border: 1px solid rgba(142, 13, 24, 0.14);
   border-radius: 18px;
   background: var(--card);
   box-shadow: var(--shadow);
@@ -195,12 +186,13 @@ h1 {
 .input-prefix { left: 18px; }
 .input-suffix { right: 18px; }
 .field input.has-prefix { padding-left: 15px; }
+.field input.currency-prefix { padding-left: 42px; }
 
 .primary-button,
 .secondary-button {
   border: 0;
   border-radius: 12px;
-  background: var(--plum);
+  background: var(--rouge);
   color: white;
   cursor: pointer;
   font-weight: 800;
@@ -210,10 +202,10 @@ h1 {
 .primary-button {
   min-height: 58px;
   padding-inline: 26px;
-  box-shadow: 0 9px 20px rgba(87, 44, 85, 0.2);
+  box-shadow: 0 9px 20px rgba(197, 22, 37, 0.2);
 }
 
-.primary-button:hover { background: var(--plum-dark); }
+.primary-button:hover { background: var(--rouge-fonce); }
 
 .advanced {
   display: none;
@@ -239,7 +231,7 @@ h1 {
   padding: 5px 0;
   border: 0;
   background: none;
-  color: var(--plum);
+  color: var(--rouge);
   cursor: pointer;
   font-size: 0.78rem;
   font-weight: 750;
@@ -253,7 +245,7 @@ h1 {
   margin-left: 4px;
   place-items: center;
   border-radius: 50%;
-  background: var(--plum);
+  background: var(--rouge);
   color: white;
   font-size: 0.65rem;
 }
@@ -361,11 +353,11 @@ h1 {
   background: rgba(28, 35, 51, 0.09);
 }
 
-.accent-0 { background: linear-gradient(145deg, #b9dbc9, #719b91); }
-.accent-1 { background: linear-gradient(145deg, #f0c6a7, #d88f6b); }
-.accent-2 { background: linear-gradient(145deg, #cbbdd8, #89719d); }
-.accent-3 { background: linear-gradient(145deg, #c8d5e1, #7890aa); }
-.accent-4 { background: linear-gradient(145deg, #ded49f, #a5a066); }
+.accent-0 { background: linear-gradient(145deg, #f5c8cc, #cf5360); }
+.accent-1 { background: linear-gradient(145deg, #f3d4c1, #d58a63); }
+.accent-2 { background: linear-gradient(145deg, #e6b7ba, #a83c48); }
+.accent-3 { background: linear-gradient(145deg, #d9c7c8, #9f777b); }
+.accent-4 { background: linear-gradient(145deg, #efd59f, #c59641); }
 
 .window-grid {
   width: 132px;
@@ -378,7 +370,7 @@ h1 {
   position: relative;
   z-index: 1;
   border: 7px solid rgba(255, 254, 251, 0.82);
-  background: rgba(63, 29, 62, 0.14);
+  background: rgba(142, 13, 24, 0.14);
   box-shadow: 22px 22px 0 rgba(255, 254, 251, 0.16);
 }
 
@@ -421,7 +413,7 @@ h1 {
 
 .rent {
   margin-bottom: 5px;
-  color: var(--plum);
+  color: var(--rouge);
   font-size: 1.1rem;
   font-weight: 850;
   letter-spacing: -0.02em;
@@ -479,8 +471,8 @@ h1 {
 .tags li {
   padding: 5px 8px;
   border-radius: 6px;
-  background: #f0ecef;
-  color: var(--plum-dark);
+  background: var(--rouge-tendre);
+  color: var(--rouge-fonce);
   font-size: 0.68rem;
   font-weight: 750;
 }
@@ -522,7 +514,7 @@ h1 {
 
 .card-footer a {
   flex: 0 0 auto;
-  color: var(--plum);
+  color: var(--rouge);
   font-size: 0.76rem;
   font-weight: 800;
   text-decoration: none;
@@ -536,7 +528,7 @@ h1 {
   text-align: center;
 }
 
-.empty-state > span { color: var(--apricot); font-size: 3rem; }
+.empty-state > span { color: var(--or); font-size: 3rem; }
 .empty-state h3 { margin: 8px 0; font-family: Georgia, serif; font-size: 1.8rem; font-weight: 500; }
 .empty-state p { margin: 0 auto 24px; max-width: 540px; color: var(--muted); line-height: 1.6; }
 .secondary-button { display: inline-block; padding: 11px 18px; }

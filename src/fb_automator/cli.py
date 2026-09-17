@@ -64,7 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     serve = subparsers.add_parser(
-        "serve", help="Serve the private room browser web application."
+        "serve", help="Serve the private Chineur2000 web application."
     )
     serve.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     serve.add_argument("--host", default="127.0.0.1")
