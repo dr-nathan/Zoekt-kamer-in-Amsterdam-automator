@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import time
 from dataclasses import replace
@@ -151,6 +152,10 @@ class FacebookCollector:
         self.headless = headless
         self.scroll_pause = scroll_pause
 
+    @property
+    def session_file(self) -> Path:
+        return self.profile_dir / "storage-state.json"
+
     def login(self) -> None:
         self.profile_dir.mkdir(parents=True, exist_ok=True)
         with sync_playwright() as playwright:
@@ -164,8 +169,25 @@ class FacebookCollector:
             if self._looks_logged_out(page):
                 context.close()
                 raise RuntimeError("Facebook still appears to be logged out; login was not saved.")
+            context.storage_state(path=str(self.session_file))
+            self.session_file.chmod(0o600)
             context.close()
         print(f"Facebook session saved under {self.profile_dir}")
+
+    def export_session(self) -> None:
+        if not self.profile_dir.exists():
+            raise RuntimeError("No browser session found. Run `fb-housing login` first.")
+        with sync_playwright() as playwright:
+            context = playwright.chromium.launch_persistent_context(
+                str(self.profile_dir), headless=True, viewport={"width": 1440, "height": 1000}
+            )
+            page = context.pages[0] if context.pages else context.new_page()
+            page.goto("https://www.facebook.com/", wait_until="domcontentloaded")
+            self._guard_access(page)
+            context.storage_state(path=str(self.session_file))
+            self.session_file.chmod(0o600)
+            context.close()
+        print(f"Transferable Facebook session saved to {self.session_file}")
 
     def collect(self, groups: list[GroupSource], max_posts: int, max_scrolls: int) -> None:
         if not self.profile_dir.exists():
@@ -177,6 +199,7 @@ class FacebookCollector:
                 headless=self.headless,
                 viewport={"width": 1440, "height": 1000},
             )
+            self._restore_session(context)
             page = context.pages[0] if context.pages else context.new_page()
             for group in groups:
                 print(f"Collecting {group.name}: {group.url}")
@@ -190,7 +213,22 @@ class FacebookCollector:
                     f"  found={len(posts)} new={inserted} refreshed={updated} "
                     f"images={image_count} database_total={store.count()}"
                 )
+            context.storage_state(path=str(self.session_file))
+            self.session_file.chmod(0o600)
             context.close()
+
+    def _restore_session(self, context: BrowserContext) -> None:
+        if not self.session_file.exists():
+            return
+        try:
+            payload = json.loads(self.session_file.read_text(encoding="utf-8"))
+            cookies = payload.get("cookies", [])
+            if cookies:
+                context.add_cookies(cookies)
+        except (json.JSONDecodeError, OSError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"Could not load transferable Facebook session: {self.session_file}"
+            ) from exc
 
     @staticmethod
     def _looks_logged_out(page: Page) -> bool:

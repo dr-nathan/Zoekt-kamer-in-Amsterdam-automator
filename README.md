@@ -37,6 +37,16 @@ A browser opens. Sign in manually, wait for the Facebook home feed, then return 
 and press Enter. Never commit `.state/` or share it: the saved browser state can access the
 Facebook account.
 
+To move the authenticated session to a private server without copying the entire browser profile:
+
+```bash
+fb-housing export-session
+```
+
+This creates `.state/facebook-profile/storage-state.json`. It contains active Facebook cookies and
+must be transferred only over SSH, kept mode `0600`, and never committed. The collector imports it
+into the destination browser profile and refreshes it after successful collections.
+
 ## Collect a small sample
 
 ```bash

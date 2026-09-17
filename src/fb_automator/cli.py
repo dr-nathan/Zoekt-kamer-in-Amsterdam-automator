@@ -20,6 +20,10 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("login", help="Open Facebook and save a local login session.")
+    subparsers.add_parser(
+        "export-session",
+        help="Export the saved Facebook login for secure transfer to another machine.",
+    )
 
     collect = subparsers.add_parser("collect", help="Collect recent posts from configured groups.")
     collect.add_argument("--groups", type=Path, default=DEFAULT_GROUPS)
@@ -113,6 +117,8 @@ def main() -> None:
     try:
         if args.command == "login":
             collector.login()
+        elif args.command == "export-session":
+            collector.export_session()
         elif args.command == "collect":
             if args.max_posts < 1 or args.max_scrolls < 0:
                 raise ValueError("Collection limits must be non-negative.")
