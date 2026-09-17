@@ -84,6 +84,28 @@ Run the unit tests with:
 python -m unittest discover -s tests
 ```
 
+## Browse the rooms
+
+Start the private web interface after collecting and extracting posts:
+
+```bash
+fb-housing serve
+```
+
+Open `http://127.0.0.1:8000`. The interface reads the same SQLite database and offers filters for
+area, maximum rent, minimum room size, registration and extracted particularities. Results can be
+sorted by collection time, price or Facebook engagement. The website never shows raw post text and
+links back to Facebook for the original context.
+
+Override the defaults when needed:
+
+```bash
+fb-housing serve --database /path/to/listings.db --host 0.0.0.0 --port 8000
+```
+
+Do not expose the app publicly before adding access control; private-group summaries are still
+private information.
+
 ## Privacy boundary
 
 This project is for a single user's private browsing interface. Do not publish session state or

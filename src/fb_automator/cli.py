@@ -58,11 +58,29 @@ def build_parser() -> argparse.ArgumentParser:
         default=4,
         help="Concurrent API requests (default: 4).",
     )
+
+    serve = subparsers.add_parser(
+        "serve", help="Serve the private room browser web application."
+    )
+    serve.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8000)
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
+    if args.command == "serve":
+        if not 1 <= args.port <= 65535:
+            raise SystemExit("error: --port must be between 1 and 65535")
+        import os
+
+        import uvicorn
+
+        os.environ["FB_DATABASE"] = str(args.database.resolve())
+        uvicorn.run("fb_automator.web:app", host=args.host, port=args.port)
+        return
+
     if args.command == "extract":
         if args.limit is not None and args.limit < 1:
             raise SystemExit("error: --limit must be at least 1")

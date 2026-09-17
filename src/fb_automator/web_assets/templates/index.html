@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="A private, searchable view of Amsterdam room posts.">
+    <title>Room Radar · Amsterdam</title>
+    <link rel="stylesheet" href="/static/site.css">
+    <script src="/static/site.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Room Radar home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>room<span>radar</span></span>
+      </a>
+      <div class="header-meta">
+        <span class="pulse" aria-hidden="true"></span>
+        Private Amsterdam feed
+      </div>
+    </header>
+
+    <main>
+      <section class="intro shell">
+        <div>
+          <p class="eyebrow">Your housing groups, organized</p>
+          <h1>Find the posts<br>worth replying to.</h1>
+        </div>
+        <p class="intro-copy">Fresh rooms from the Facebook groups you already follow, turned into one calm, filterable feed.</p>
+      </section>
+
+      <section class="search-wrap shell" aria-label="Search rooms">
+        <form class="search-panel" method="get" action="/">
+          <label class="field field-area">
+            <span>Area or neighborhood</span>
+            <input name="area" type="search" placeholder="e.g. Oost, De Pijp" value="{{ filters.area }}">
+          </label>
+          <label class="field">
+            <span>Max rent</span>
+            <span class="input-prefix">€</span>
+            <input class="has-prefix" name="max_rent" type="number" min="0" max="10000" step="25" placeholder="1,000" value="{{ filters.max_rent if filters.max_rent is not none else '' }}">
+          </label>
+          <label class="field">
+            <span>Min. room size</span>
+            <input name="min_size" type="number" min="0" max="1000" placeholder="12" value="{{ filters.min_size if filters.min_size is not none else '' }}">
+            <span class="input-suffix">m²</span>
+          </label>
+          <button class="primary-button" type="submit">Show rooms</button>
+
+          <div class="advanced" id="advanced-filters">
+            <label class="field select-field">
+              <span>Registration</span>
+              <select name="registration">
+                <option value="any" {% if filters.registration == 'any' %}selected{% endif %}>Any</option>
+                <option value="allowed" {% if filters.registration == 'allowed' %}selected{% endif %}>Allowed</option>
+                <option value="required" {% if filters.registration == 'required' %}selected{% endif %}>Required</option>
+                <option value="not_allowed" {% if filters.registration == 'not_allowed' %}selected{% endif %}>Not allowed</option>
+              </select>
+            </label>
+            <label class="field select-field">
+              <span>Particularity</span>
+              <select name="particularity">
+                <option value="">Anything</option>
+                {% for option in particularities %}
+                  <option value="{{ option }}" {% if filters.particularity == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+              </select>
+            </label>
+          </div>
+
+          <div class="filter-actions">
+            <button class="text-button" type="button" data-filter-toggle aria-expanded="{{ 'true' if active_filter_count > 3 else 'false' }}" aria-controls="advanced-filters">
+              More filters{% if active_filter_count %} <strong>{{ active_filter_count }}</strong>{% endif %}
+            </button>
+            {% if active_filter_count %}<a class="clear-link" href="/">Clear all</a>{% endif %}
+          </div>
+        </form>
+      </section>
+
+      <section class="results shell" aria-labelledby="results-heading">
+        <div class="results-bar">
+          <div>
+            <p class="eyebrow">Latest matches</p>
+            <h2 id="results-heading">{{ listings|length }} room{{ '' if listings|length == 1 else 's' }} on your radar</h2>
+          </div>
+          <form class="sort-form" method="get" action="/">
+            <input type="hidden" name="area" value="{{ filters.area }}">
+            {% if filters.max_rent is not none %}<input type="hidden" name="max_rent" value="{{ filters.max_rent }}">{% endif %}
+            {% if filters.min_size is not none %}<input type="hidden" name="min_size" value="{{ filters.min_size }}">{% endif %}
+            <input type="hidden" name="registration" value="{{ filters.registration }}">
+            <input type="hidden" name="particularity" value="{{ filters.particularity }}">
+            <label>
+              <span>Sort by</span>
+              <select name="sort" data-auto-submit>
+                <option value="newest" {% if filters.sort == 'newest' %}selected{% endif %}>Newest collected</option>
+                <option value="popular" {% if filters.sort == 'popular' %}selected{% endif %}>Most discussed</option>
+                <option value="rent_asc" {% if filters.sort == 'rent_asc' %}selected{% endif %}>Lowest rent</option>
+                <option value="rent_desc" {% if filters.sort == 'rent_desc' %}selected{% endif %}>Highest rent</option>
+              </select>
+            </label>
+          </form>
+        </div>
+
+        {% if listings %}
+          <div class="listing-grid">
+            {% for listing in listings %}
+              <article class="listing-card">
+                <div class="card-visual accent-{{ listing.accent }}">
+                  <div class="window-grid" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+                  <span class="photo-note">Photo not collected</span>
+                  {% if listing.is_new %}<span class="new-badge">New</span>{% endif %}
+                </div>
+                <div class="card-body">
+                  <div class="card-heading">
+                    <div>
+                      <p class="rent">{{ listing.rent_label }}</p>
+                      <h3>{{ listing.neighborhood or listing.location }}</h3>
+                    </div>
+                    {% if listing.engagement_label %}
+                      <span class="engagement" title="Facebook engagement">{{ listing.engagement_label }}</span>
+                    {% endif %}
+                  </div>
+
+                  <div class="facts" aria-label="Room facts">
+                    <span>{{ listing.size_label }}</span>
+                    <span>{{ listing.availability_label }}</span>
+                    {% if listing.utilities == 'included' %}<span>Utilities included</span>{% endif %}
+                  </div>
+
+                  {% if listing.particularities %}
+                    <ul class="tags" aria-label="Particularities">
+                      {% for item in listing.particularities[:3] %}<li>{{ item }}</li>{% endfor %}
+                    </ul>
+                  {% endif %}
+
+                  <p class="summary">{{ listing.summary }}</p>
+
+                  <div class="card-footer">
+                    <span><strong>{{ listing.posted_label }}</strong><small>{{ listing.group_name }}</small></span>
+                    {% if listing.post_url %}
+                      <a href="{{ listing.post_url }}" target="_blank" rel="noopener noreferrer">View post <span aria-hidden="true">↗</span></a>
+                    {% endif %}
+                  </div>
+                </div>
+              </article>
+            {% endfor %}
+          </div>
+        {% elif database_ready %}
+          <div class="empty-state">
+            <span aria-hidden="true">⌁</span>
+            <h3>No rooms match these filters yet.</h3>
+            <p>Try widening the price, size or area—or clear the filters and start again.</p>
+            <a class="secondary-button" href="/">Clear filters</a>
+          </div>
+        {% else %}
+          <div class="empty-state">
+            <span aria-hidden="true">⌁</span>
+            <h3>The feed is ready for its first collection.</h3>
+            <p>Once the collector writes <code>data/listings.db</code>, rooms will appear here automatically.</p>
+          </div>
+        {% endif %}
+      </section>
+    </main>
+
+    <footer class="site-footer shell">
+      <span>Room Radar · a private browsing tool</span>
+      <span>Always verify details in the original post.</span>
+    </footer>
+  </body>
+</html>
