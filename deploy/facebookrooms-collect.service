@@ -1,0 +1,23 @@
+[Unit]
+Description=Collect and extract Facebook room listings
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=nathan
+Group=nathan
+WorkingDirectory=/home/nathan/facebookrooms
+EnvironmentFile=/home/nathan/facebookrooms/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/nathan/facebookrooms/.venv/bin/fb-housing collect --groups /home/nathan/facebookrooms/config/groups.json --database /home/nathan/facebookrooms-data/listings.db --max-posts 50 --max-scrolls 15 --scroll-pause 3 --headless
+ExecStart=/home/nathan/facebookrooms/.venv/bin/fb-housing extract --database /home/nathan/facebookrooms-data/listings.db --workers 2
+TimeoutStartSec=20min
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/nathan/facebookrooms-data /home/nathan/facebookrooms/.state

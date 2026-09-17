@@ -10,3 +10,4 @@ config/groups.json
 .DS_Store
 .Rhistory
 *.egg-info/
+.env

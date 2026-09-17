@@ -44,6 +44,20 @@ class PostStoreTests(unittest.TestCase):
                     """SELECT observed_at, reaction_count, comment_count
                        FROM engagement_snapshots ORDER BY observed_at"""
                 ).fetchall()
+                key = store.connection.execute(
+                    "SELECT dedupe_key FROM raw_posts"
+                ).fetchone()[0]
+                store.upsert_image(
+                    raw_post_key=key,
+                    position=0,
+                    source_url="https://scontent.example/room.jpg",
+                    local_path=f"images/{key}/0-room.jpg",
+                    content_type="image/jpeg",
+                    observed_at=second.scraped_at,
+                )
+                image = store.connection.execute(
+                    "SELECT source_url, local_path, content_type FROM post_images"
+                ).fetchone()
         self.assertEqual(
             row,
             (
@@ -60,6 +74,14 @@ class PostStoreTests(unittest.TestCase):
                 ("2026-09-16T10:00:00+00:00", 4, 2),
                 ("2026-09-16T11:00:00+00:00", 9, 5),
             ],
+        )
+        self.assertEqual(
+            image,
+            (
+                "https://scontent.example/room.jpg",
+                f"images/{key}/0-room.jpg",
+                "image/jpeg",
+            ),
         )
 
 

@@ -47,12 +47,13 @@ class PostUrlTests(unittest.TestCase):
         )
         current = RawPost(
             "Housing", "group", "1", "post", "Short", None,
-            "2026-09-16T10:01:00+00:00", 7, 3,
+            "2026-09-16T10:01:00+00:00", 7, 3, ("https://example.com/room.jpg",),
         )
         merged = merge_post_observations(previous, current)
         self.assertEqual(merged.text, "Longer original text")
         self.assertEqual((merged.reaction_count, merged.comment_count), (7, 3))
         self.assertEqual(merged.scraped_at, "2026-09-16T10:01:00+00:00")
+        self.assertEqual(merged.image_urls, ("https://example.com/room.jpg",))
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse
@@ -52,6 +52,7 @@ class ListingCard:
     reaction_count: int | None
     comment_count: int | None
     accent: int
+    image_url: str | None
 
     @property
     def rent_label(self) -> str:
@@ -144,13 +145,32 @@ class ListingRepository:
             ),
         }.get(filters.sort, "r.last_seen_at DESC")
 
+        image_expression = "NULL AS image_path"
+        try:
+            probe = sqlite3.connect(
+                f"file:{self.database.resolve()}?mode=ro", uri=True
+            )
+            has_images = probe.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'post_images'"
+            ).fetchone()
+            probe.close()
+            if has_images:
+                image_expression = """
+                    (SELECT pi.local_path FROM post_images AS pi
+                     WHERE pi.raw_post_key = l.raw_post_key
+                       AND pi.local_path IS NOT NULL
+                     ORDER BY pi.position LIMIT 1) AS image_path
+                """
+        except sqlite3.Error:
+            pass
+
         query = f"""
             SELECT l.raw_post_key, l.monthly_rent, l.utilities, l.room_size_m2,
                    l.location_text, l.city, l.neighborhood, l.available_from,
                    l.available_to, l.lease_type, l.registration, l.furnishing,
                    l.amenities_json, l.particularities_json, l.summary,
                    r.post_url, r.group_name, r.published_label, r.last_seen_at,
-                   r.reaction_count, r.comment_count
+                   r.reaction_count, r.comment_count, {image_expression}
             FROM listings AS l
             JOIN raw_posts AS r ON r.dedupe_key = l.raw_post_key
             WHERE {' AND '.join(clauses)}
@@ -196,7 +216,18 @@ class ListingRepository:
             reaction_count=row["reaction_count"],
             comment_count=row["comment_count"],
             accent=int(hashlib.sha256(key.encode()).hexdigest()[:2], 16) % 5,
+            image_url=self._media_url(row["image_path"]),
         )
+
+    def _media_url(self, local_path: str | None) -> str | None:
+        if not local_path:
+            return None
+        path = Path(local_path)
+        if path.is_absolute() or ".." in path.parts or len(path.parts) < 2:
+            return None
+        if path.parts[0] != "images" or not (self.database.parent / path).is_file():
+            return None
+        return "/media/" + "/".join(quote(part) for part in path.parts[1:])
 
     def particularities(self) -> list[str]:
         if not self.database.exists():
@@ -239,21 +270,26 @@ def create_app(database: Path | None = None) -> FastAPI:
     application.mount(
         "/static", StaticFiles(directory=ASSET_ROOT / "static"), name="static"
     )
+    application.mount(
+        "/media",
+        StaticFiles(directory=database_path.parent / "images", check_dir=False),
+        name="media",
+    )
 
     @application.get("/", response_class=HTMLResponse)
     def index(
         request: Request,
         area: str = Query(default="", max_length=80),
-        max_rent: int | None = Query(default=None, ge=0, le=10000),
-        min_size: int | None = Query(default=None, ge=0, le=1000),
+        max_rent: str = Query(default="", max_length=10),
+        min_size: str = Query(default="", max_length=10),
         registration: str = Query(default="any", max_length=20),
         particularity: str = Query(default="", max_length=80),
         sort: str = Query(default="newest", max_length=20),
     ) -> HTMLResponse:
         filters = ListingSearch(
             area=area.strip(),
-            max_rent=max_rent,
-            min_size=min_size,
+            max_rent=_optional_int(max_rent, maximum=10_000),
+            min_size=_optional_int(min_size, maximum=1_000),
             registration=registration,
             particularity=particularity,
             sort=sort,
@@ -324,6 +360,16 @@ def _parse_datetime(value: str) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _optional_int(value: str, *, maximum: int) -> int | None:
+    if not value.strip():
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        return None
+    return parsed if 0 <= parsed <= maximum else None
 
 
 app = create_app()

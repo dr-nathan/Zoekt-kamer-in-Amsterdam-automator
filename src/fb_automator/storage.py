@@ -39,6 +39,20 @@ CREATE TABLE IF NOT EXISTS engagement_snapshots (
 CREATE INDEX IF NOT EXISTS idx_engagement_snapshots_post
     ON engagement_snapshots (raw_post_key, observed_at DESC);
 
+CREATE TABLE IF NOT EXISTS post_images (
+    raw_post_key TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    source_url TEXT NOT NULL,
+    local_path TEXT,
+    content_type TEXT,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    PRIMARY KEY (raw_post_key, position),
+    FOREIGN KEY (raw_post_key) REFERENCES raw_posts(dedupe_key) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_post_images_source
+    ON post_images (raw_post_key, source_url);
+
 CREATE TABLE IF NOT EXISTS listings (
     raw_post_key TEXT PRIMARY KEY,
     listing_kind TEXT NOT NULL,
@@ -210,6 +224,52 @@ class PostStore:
     def count(self) -> int:
         row = self.connection.execute("SELECT COUNT(*) FROM raw_posts").fetchone()
         return int(row[0])
+
+    def stored_image_path(self, raw_post_key: str, source_url: str) -> str | None:
+        row = self.connection.execute(
+            """
+            SELECT local_path
+            FROM post_images
+            WHERE raw_post_key = ? AND source_url = ? AND local_path IS NOT NULL
+            LIMIT 1
+            """,
+            (raw_post_key, source_url),
+        ).fetchone()
+        return str(row[0]) if row else None
+
+    def upsert_image(
+        self,
+        *,
+        raw_post_key: str,
+        position: int,
+        source_url: str,
+        local_path: str,
+        content_type: str,
+        observed_at: str,
+    ) -> None:
+        with self.connection:
+            self.connection.execute(
+                """
+                INSERT INTO post_images (
+                    raw_post_key, position, source_url, local_path, content_type,
+                    first_seen_at, last_seen_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(raw_post_key, position) DO UPDATE SET
+                    source_url = excluded.source_url,
+                    local_path = excluded.local_path,
+                    content_type = excluded.content_type,
+                    last_seen_at = excluded.last_seen_at
+                """,
+                (
+                    raw_post_key,
+                    position,
+                    source_url,
+                    local_path,
+                    content_type,
+                    observed_at,
+                    observed_at,
+                ),
+            )
 
     def raw_posts_for_extraction(self) -> list[dict[str, str | None]]:
         rows = self.connection.execute(

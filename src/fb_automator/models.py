@@ -20,6 +20,7 @@ class RawPost:
     scraped_at: str
     reaction_count: int | None = None
     comment_count: int | None = None
+    image_urls: tuple[str, ...] = ()
 
-    def as_dict(self) -> dict[str, str | int | None]:
+    def as_dict(self) -> dict[str, object]:
         return asdict(self)

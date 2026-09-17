@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import time
 from dataclasses import replace
@@ -8,10 +9,15 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
+from playwright.sync_api import (
+    BrowserContext,
+    Page,
+    TimeoutError as PlaywrightTimeoutError,
+    sync_playwright,
+)
 
 from fb_automator.models import GroupSource, RawPost
-from fb_automator.storage import PostStore
+from fb_automator.storage import PostStore, dedupe_key
 
 POST_BODY_SELECTOR = '[data-ad-preview="message"], div[dir="auto"]'
 POST_PATH = re.compile(r"/groups/[^/]+/(?:posts|permalink)/([^/?#]+)")
@@ -28,6 +34,13 @@ COMMENT_HINT = re.compile(r"comment|commentaar|opmerking", re.IGNORECASE)
 REACTION_HINT = re.compile(
     r"reaction|reactie|reacted|gereageerd|likes?|vind-ik-leuk", re.IGNORECASE
 )
+IMAGE_TYPES = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+}
+MAX_IMAGES_PER_POST = 3
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 
 def _human_count(value: str) -> int | None:
@@ -101,6 +114,7 @@ def merge_post_observations(previous: RawPost | None, current: RawPost) -> RawPo
             if current.comment_count is not None
             else previous.comment_count
         ),
+        image_urls=current.image_urls or previous.image_urls,
     )
 
 
@@ -171,9 +185,10 @@ class FacebookCollector:
                 self._wait_for_feed(page)
                 posts = self._collect_group(page, group, max_posts, max_scrolls)
                 inserted, updated = store.upsert(posts)
+                image_count = self._download_images(context, posts, store)
                 print(
                     f"  found={len(posts)} new={inserted} refreshed={updated} "
-                    f"database_total={store.count()}"
+                    f"images={image_count} database_total={store.count()}"
                 )
             context.close()
 
@@ -304,10 +319,35 @@ class FacebookCollector:
                   return /comment|commentaar|opmerking|react|gereageerd|like|vind-ik-leuk/
                     .test(value);
                 }).slice(0, 100);
+                const images = [...(container || message).querySelectorAll('img[src]')]
+                  .map((image) => {
+                    const rect = image.getBoundingClientRect();
+                    const naturalWidth = image.naturalWidth || 0;
+                    const naturalHeight = image.naturalHeight || 0;
+                    const profileLink = image.closest(
+                      'a[href*="/profile.php"], a[href*="/people/"], a[href*="/user/"]'
+                    );
+                    return {
+                      src: image.currentSrc || image.src || '',
+                      width: Math.max(rect.width, naturalWidth),
+                      height: Math.max(rect.height, naturalHeight),
+                      profile: Boolean(profileLink)
+                    };
+                  })
+                  .filter((image) => {
+                    if (!image.src.startsWith('https://') || image.profile) return false;
+                    if (image.width < 280 || image.height < 160) return false;
+                    return /(?:fbcdn\\.net|facebook\\.com)/i.test(image.src);
+                  })
+                  .sort((a, b) => (b.width * b.height) - (a.width * a.height))
+                  .map((image) => image.src)
+                  .filter((src, index, all) => all.indexOf(src) === index)
+                  .slice(0, 3);
                 return {
                   text,
                   links,
-                  engagement
+                  engagement,
+                  images
                 };
               }).filter(Boolean);
             }
@@ -341,6 +381,57 @@ class FacebookCollector:
                     scraped_at=scraped_at,
                     reaction_count=reaction_count,
                     comment_count=comment_count,
+                    image_urls=tuple(
+                        str(url) for url in item.get("images", []) if str(url)
+                    ),
                 )
             )
         return posts
+
+    def _download_images(
+        self, context: BrowserContext, posts: list[RawPost], store: PostStore
+    ) -> int:
+        downloaded = 0
+        for post in posts:
+            raw_post_key = dedupe_key(post)
+            for position, source_url in enumerate(
+                post.image_urls[:MAX_IMAGES_PER_POST]
+            ):
+                stored = store.stored_image_path(raw_post_key, source_url)
+                if stored and (self.database.parent / stored).is_file():
+                    continue
+                try:
+                    response = context.request.get(
+                        source_url,
+                        headers={"Referer": post.post_url or post.group_url},
+                        timeout=30_000,
+                    )
+                    content_type = response.headers.get("content-type", "").split(";", 1)[0]
+                    extension = IMAGE_TYPES.get(content_type)
+                    if not response.ok or extension is None:
+                        continue
+                    body = response.body()
+                    if not body or len(body) > MAX_IMAGE_BYTES:
+                        continue
+                except Exception:
+                    continue
+
+                digest = hashlib.sha256(body).hexdigest()[:16]
+                relative_path = (
+                    Path("images")
+                    / raw_post_key
+                    / f"{position}-{digest}.{extension}"
+                )
+                target = self.database.parent / relative_path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(body)
+                store.upsert_image(
+                    raw_post_key=raw_post_key,
+                    position=position,
+                    source_url=source_url,
+                    local_path=relative_path.as_posix(),
+                    content_type=content_type,
+                    observed_at=post.scraped_at,
+                )
+                downloaded += 1
+        return downloaded

@@ -1,0 +1,9 @@
+facebookrooms.nl, www.facebookrooms.nl {
+	encode zstd gzip
+
+	basic_auth {
+		nathan REPLACE_WITH_CADDY_PASSWORD_HASH
+	}
+
+	reverse_proxy 127.0.0.1:8000
+}

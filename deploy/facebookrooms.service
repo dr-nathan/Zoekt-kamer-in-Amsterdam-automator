@@ -1,0 +1,24 @@
+[Unit]
+Description=Facebook Rooms private web application
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nathan
+Group=nathan
+WorkingDirectory=/home/nathan/facebookrooms
+EnvironmentFile=-/home/nathan/facebookrooms/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/nathan/facebookrooms/.venv/bin/fb-housing serve --database /home/nathan/facebookrooms-data/listings.db --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/nathan/facebookrooms-data
+
+[Install]
+WantedBy=multi-user.target

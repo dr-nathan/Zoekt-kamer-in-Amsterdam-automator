@@ -103,8 +103,8 @@ button, input, select { font: inherit; }
 }
 
 .intro {
-  min-height: 330px;
-  padding-block: 74px 54px;
+  min-height: 260px;
+  padding-block: 50px 38px;
   display: grid;
   grid-template-columns: 1.45fr 0.7fr;
   align-items: end;
@@ -126,7 +126,7 @@ h1 {
   margin-bottom: 0;
   max-width: 740px;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(3.4rem, 7.3vw, 6.4rem);
+  font-size: clamp(3.2rem, 6vw, 5.2rem);
   font-weight: 500;
   line-height: 0.92;
   letter-spacing: -0.065em;
@@ -322,6 +322,20 @@ h1 {
   overflow: hidden;
   background: #cfdad5;
 }
+
+.card-visual.has-photo::before,
+.card-visual.has-photo::after { display: none; }
+
+.card-photo {
+  width: calc(100% + 32px);
+  height: calc(100% + 32px);
+  margin: -16px;
+  display: block;
+  object-fit: cover;
+  transition: transform 300ms ease;
+}
+
+.listing-card:hover .card-photo { transform: scale(1.025); }
 
 .card-visual::before,
 .card-visual::after {

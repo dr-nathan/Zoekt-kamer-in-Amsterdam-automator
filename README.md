@@ -53,6 +53,11 @@ Each collection also captures the visible reaction and comment counts. `raw_post
 known counts, while `engagement_snapshots` keeps dated observations so popularity can be graphed or
 ranked later. Missing Facebook UI counters are stored as unknown rather than assumed to be zero.
 
+Up to three listing photos per post are downloaded into `data/images/`. SQLite keeps their source
+URL, ordering and local path in `post_images`; the image bytes are deliberately kept out of the
+database. The private website serves these local copies, so its visitors do not depend on expiring
+Facebook CDN URLs or make direct image requests to Facebook.
+
 ## Extract filterable listings
 
 ```bash
@@ -105,6 +110,20 @@ fb-housing serve --database /path/to/listings.db --host 0.0.0.0 --port 8000
 
 Do not expose the app publicly before adding access control; private-group summaries are still
 private information.
+
+## VPS layout
+
+The production layout keeps deployable code separate from private runtime state:
+
+- `/home/nathan/facebookrooms`: Git checkout, virtual environment and private `.env` file.
+- `/home/nathan/facebookrooms-data`: SQLite database and downloaded listing photos.
+- `facebookrooms.service`: web application on localhost port 8000.
+- Caddy: HTTPS, password protection and reverse proxy for `facebookrooms.nl`.
+- `facebookrooms-collect.timer`: optional randomized refresh every 30–40 minutes. Enable this only
+  after a Facebook session and `OPENAI_API_KEY` have been installed on the VPS.
+
+Deployment templates are stored in `deploy/`. Never commit the Caddy password hash, `.env`, browser
+session or production database.
 
 ## Privacy boundary
 

@@ -105,9 +105,13 @@
           <div class="listing-grid">
             {% for listing in listings %}
               <article class="listing-card">
-                <div class="card-visual accent-{{ listing.accent }}">
-                  <div class="window-grid" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
-                  <span class="photo-note">Photo not collected</span>
+                <div class="card-visual accent-{{ listing.accent }}{% if listing.image_url %} has-photo{% endif %}">
+                  {% if listing.image_url %}
+                    <img class="card-photo" src="{{ listing.image_url }}" alt="Room photo from the original Facebook post" loading="lazy">
+                  {% else %}
+                    <div class="window-grid" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+                    <span class="photo-note">Photo not collected</span>
+                  {% endif %}
                   {% if listing.is_new %}<span class="new-badge">New</span>{% endif %}
                 </div>
                 <div class="card-body">
