@@ -423,7 +423,7 @@ class FacebookCollector:
                   .filter((image) => {
                     if (!image.src.startsWith('https://') || image.profile) return false;
                     if (image.width < 280 || image.height < 160) return false;
-                    return /(?:fbcdn\\.net|facebook\\.com)/i.test(image.src);
+                    return /(?:fbcdn\.net|facebook\.com)/i.test(image.src);
                   })
                   .sort((a, b) => (b.width * b.height) - (a.width * a.height))
                   .map((image) => image.src)
