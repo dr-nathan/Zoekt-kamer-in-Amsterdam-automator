@@ -1,6 +1,7 @@
 import unittest
 
 from fb_automator.collector import (
+    POST_BODY_SELECTOR,
     canonical_post_url,
     merge_post_observations,
     parse_engagement_counts,
@@ -10,6 +11,10 @@ from fb_automator.models import RawPost
 
 
 class PostUrlTests(unittest.TestCase):
+    def test_post_selector_excludes_generic_comment_text_nodes(self) -> None:
+        self.assertIn("blockquote", POST_BODY_SELECTOR)
+        self.assertNotIn('div[dir="auto"]', POST_BODY_SELECTOR)
+
     def test_normalizes_group_post_url(self) -> None:
         raw = "https://m.facebook.com/groups/123/posts/456/?tracking=value"
         normalized = canonical_post_url(raw)

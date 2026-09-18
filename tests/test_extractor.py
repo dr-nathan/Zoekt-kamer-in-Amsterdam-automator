@@ -90,13 +90,23 @@ class ExtractorTests(unittest.TestCase):
         self.assertEqual(listing.monthly_rent, 900)
         self.assertEqual(listing.amenities, ("balcon",))
         self.assertEqual(len(listing.evidence), 1)
-        self.assertEqual(listing.extraction_version, "llm-v4-lausanne:test-model")
+        self.assertEqual(
+            listing.extraction_version,
+            "llm-v5-lausanne-post-integrity:test-model",
+        )
         call = client.responses.calls[0]
         self.assertIs(call["text_format"], ExtractedListing)
         self.assertFalse(call["store"])
-        self.assertEqual(call["prompt_cache_key"], "fb-housing:llm-v4-lausanne:test-model")
+        self.assertEqual(
+            call["prompt_cache_key"],
+            "fb-housing:llm-v5-lausanne-post-integrity:test-model",
+        )
         self.assertEqual(call["input"][0]["role"], "developer")
         self.assertIn("untrusted data", call["input"][0]["content"])
+        self.assertIn(
+            "Facebook comments, replies, reactions",
+            call["input"][0]["content"],
+        )
 
     def test_database_extraction_is_cached_by_content_and_model(self) -> None:
         post = RawPost(
@@ -145,7 +155,7 @@ class ExtractorTests(unittest.TestCase):
                 "offer",
                 900,
                 "Chambre à Sous-Gare avec domiciliation possible.",
-                "llm-v4-lausanne:test-model",
+                "llm-v5-lausanne-post-integrity:test-model",
             ),
         )
         self.assertEqual(len(client.responses.calls), 1)

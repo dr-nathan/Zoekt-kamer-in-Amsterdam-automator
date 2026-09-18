@@ -20,7 +20,11 @@ from playwright.sync_api import (
 from fb_automator.models import GroupSource, RawPost
 from fb_automator.storage import PostStore, dedupe_key
 
-POST_BODY_SELECTOR = '[data-ad-preview="message"], div[dir="auto"]'
+POST_BODY_SELECTOR = (
+    '[data-ad-preview="message"], '
+    '[data-ad-comet-preview="message"], '
+    "blockquote"
+)
 POST_PATH = re.compile(r"/groups/[^/]+/(?:posts|permalink)/([^/?#]+)")
 SEE_MORE_LABELS = ("See more", "Meer weergeven")
 BLOCK_MESSAGE = re.compile(
@@ -255,7 +259,7 @@ class FacebookCollector:
     @staticmethod
     def _wait_for_feed(page: Page) -> None:
         try:
-            page.locator('a[href*="/posts/"]').first.wait_for(
+            page.locator(POST_BODY_SELECTOR).first.wait_for(
                 state="attached", timeout=20_000
             )
             page.wait_for_timeout(2_000)
@@ -320,33 +324,58 @@ class FacebookCollector:
     def _extract_visible_posts(page: Page, group: GroupSource) -> list[RawPost]:
         scraped_at = datetime.now(UTC).isoformat()
         raw_items: list[dict[str, Any]] = page.locator(POST_BODY_SELECTOR).evaluate_all(
-            """
+            r"""
             (nodes) => {
               const unique = [...new Set(nodes)];
               return unique.map((message) => {
-                const explicitMessage = message.hasAttribute('data-ad-preview') ||
-                                        message.hasAttribute('data-ad-comet-preview');
-                const text = (message.innerText || message.textContent || '').trim();
-                if (!text || (!explicitMessage && text.length < 40)) return null;
+                // Facebook renders the original post inside a blockquote. Comments use
+                // very similar div[dir="auto"] nodes, but live inside role=article.
+                // Starting from every dir=auto node therefore paired comment text with
+                // the parent post's permalink and gallery. Anchor extraction on the
+                // post body instead and explicitly reject comment/reply articles.
+                const body = message.closest('blockquote') || message;
+                if (body.closest('[role="article"]')) return null;
+                const text = (body.innerText || body.textContent || '').trim();
+                if (!text || text.length < 40) return null;
 
-                let container = message;
+                // The blockquote's immediate wrapper owns the post gallery and action
+                // bar. Its parent may also contain the comments, so never use that
+                // larger ancestor for images or engagement.
+                const content = body.parentElement || body;
+
+                // Permalinks sit just outside the content wrapper. A comment timestamp
+                // may be the only visible /posts/ link in a single-post view; it still
+                // identifies the parent post, but prefer the clean permalink when one
+                // is available.
+                let linkContainer = content;
                 let hops = 0;
-                while (container && container !== document.body) {
-                  if (container.querySelector('a[href*="/posts/"]')) break;
-                  container = container.parentElement;
+                let postLinks = [];
+                while (linkContainer && linkContainer !== document.body && hops <= 12) {
+                  postLinks = [...linkContainer.querySelectorAll('a[href]')].filter(
+                    (anchor) => /\/groups\/[^/]+\/(?:posts|permalink)\//
+                      .test(anchor.href || '')
+                  );
+                  if (postLinks.length) break;
+                  linkContainer = linkContainer.parentElement;
                   hops += 1;
                 }
-                if (!container || container === document.body) return null;
-                if (!explicitMessage && hops > 8) return null;
+                if (!linkContainer || linkContainer === document.body || !postLinks.length) {
+                  return null;
+                }
+                postLinks.sort((left, right) => {
+                  const leftComment = /[?&]comment_id=/.test(left.href || '');
+                  const rightComment = /[?&]comment_id=/.test(right.href || '');
+                  return Number(leftComment) - Number(rightComment);
+                });
 
-                const links = [...(container || message).querySelectorAll('a[href]')]
+                const links = postLinks
                   .map((anchor) => ({
                   href: anchor.href,
                   label: anchor.getAttribute('aria-label') ||
                          anchor.getAttribute('title') ||
                          anchor.textContent || ''
                 }));
-                const engagement = [...(container || message).querySelectorAll(
+                const engagement = [...content.querySelectorAll(
                   '[aria-label], [title], [role="button"], a[href]'
                 )].map((element) => ({
                   aria_label: element.getAttribute('aria-label') || '',
@@ -359,7 +388,7 @@ class FacebookCollector:
                   return /comment|commentaar|opmerking|react|gereageerd|like|vind-ik-leuk/
                     .test(value);
                 }).slice(0, 100);
-                const images = [...(container || message).querySelectorAll('img[src]')]
+                const images = [...content.querySelectorAll('img[src]')]
                   .map((image) => {
                     const rect = image.getBoundingClientRect();
                     const naturalWidth = image.naturalWidth || 0;

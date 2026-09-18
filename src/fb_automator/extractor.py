@@ -16,7 +16,7 @@ from fb_automator.listing_models import (
 from fb_automator.storage import PostStore
 
 DEFAULT_MODEL = "gpt-5.4-mini"
-EXTRACTION_VERSION = "llm-v4-lausanne"
+EXTRACTION_VERSION = "llm-v5-lausanne-post-integrity"
 
 LAUSANNE_NEIGHBORHOODS = "\n".join(
     f"- {neighborhood.value}" for neighborhood in LausanneNeighborhood
@@ -29,8 +29,14 @@ Posts may be French, English, German, Italian, or mixed. Use only facts stated i
 facts: use null or unknown. Distinguish requirements for the new tenant from descriptions of current
 residents or the author.
 
-Classify listing_kind from the housing transaction, not from words such as recherche, cherche,
-looking for, or wanted:
+First decide whether the text is a self-contained original housing advertisement or housing request
+written by the person making the transaction. Facebook comments, replies, reactions, critiques,
+questions about someone else's listing, tagged names, and fragments that only make sense as a reply
+must be classified as unknown—even if they mention rent, a reprise, a room, an apartment, or housing
+features. Do not reconstruct an offer from conversational context that is absent from the text.
+
+For genuine original posts, classify listing_kind from the housing transaction, not from words such
+as recherche, cherche, looking for, or wanted:
 - offer: the poster has a room or home available and seeks a tenant or roommate. "Colocataire
   recherché" and "je cherche quelqu’un pour reprendre ma chambre" are offers.
 - wanted: the poster needs housing for themselves and asks others for a room, apartment, or place
