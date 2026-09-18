@@ -338,10 +338,27 @@ class FacebookCollector:
                 const text = (body.innerText || body.textContent || '').trim();
                 if (!text || text.length < 40) return null;
 
-                // The blockquote's immediate wrapper owns the post gallery and action
-                // bar. Its parent may also contain the comments, so never use that
-                // larger ancestor for images or engagement.
-                const content = body.parentElement || body;
+                // Walk only inside the comment-free post shell and stop at the first
+                // ancestor that owns a real gallery image. Expanding "See more" can
+                // insert an extra wrapper between the blockquote and that gallery.
+                let content = body;
+                for (let depth = 0; depth < 6; depth += 1) {
+                  const parent = content.parentElement;
+                  if (!parent || parent === document.body) break;
+                  if (parent.querySelector('[role="article"]') &&
+                      !content.querySelector('[role="article"]')) break;
+                  content = parent;
+                  const hasGalleryImage = [...content.querySelectorAll('img[src]')]
+                    .some((image) => {
+                      const rect = image.getBoundingClientRect();
+                      const width = Math.max(rect.width, image.naturalWidth || 0);
+                      const height = Math.max(rect.height, image.naturalHeight || 0);
+                      const src = image.currentSrc || image.src || '';
+                      return width >= 280 && height >= 160 &&
+                        /(?:fbcdn\.net|facebook\.com)/i.test(src);
+                    });
+                  if (hasGalleryImage) break;
+                }
 
                 // Permalinks sit just outside the content wrapper. A comment timestamp
                 // may be the only visible /posts/ link in a single-post view; it still
