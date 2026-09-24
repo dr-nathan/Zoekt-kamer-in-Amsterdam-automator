@@ -161,6 +161,7 @@ class ListingRepositoryTests(unittest.TestCase):
             self.assertEqual(picker.status_code, 200)
             self.assertIn('/ville/amsterdam', picker.text)
             self.assertIn('/ville/lausanne', picker.text)
+            self.assertIn("1 annonce récente", picker.text)
 
             lausanne = client.get("/ville/lausanne")
             self.assertEqual(lausanne.status_code, 200)

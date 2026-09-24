@@ -379,7 +379,7 @@ class ListingRepository:
                     GROUP BY r.source_city
                     """,
                     (cutoff,),
-                )
+                ).fetchall()
             for city_slug, count in rows:
                 if city_slug in counts:
                     counts[str(city_slug)] = int(count)
