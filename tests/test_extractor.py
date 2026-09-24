@@ -80,6 +80,16 @@ class FakeClient:
 
 
 class ExtractorTests(unittest.TestCase):
+    def test_overlong_model_summary_is_clipped_instead_of_aborting(self) -> None:
+        result = model_result().model_copy(
+            update={"summary": " ".join(f"mot{i}" for i in range(50))}
+        )
+
+        normalized = ExtractedListing.model_validate(result.model_dump())
+
+        self.assertEqual(len(normalized.summary.rstrip("…").split()), 45)
+        self.assertTrue(normalized.summary.endswith("…"))
+
     def test_uses_structured_llm_output_without_regex_inference(self) -> None:
         client = FakeClient()
         listing = LLMListingExtractor(model="test-model", client=client).extract(

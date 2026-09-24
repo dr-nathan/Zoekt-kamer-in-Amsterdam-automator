@@ -220,9 +220,10 @@ class ExtractedListing(BaseModel):
     @field_validator("summary")
     @classmethod
     def validate_summary_length(cls, value: str) -> str:
-        if len(value.split()) > 45:
-            raise ValueError("summary must contain at most 45 words")
-        return value
+        words = value.split()
+        if len(words) <= 45:
+            return value
+        return " ".join(words[:45]).rstrip(" ,;:") + "…"
 
 
 @dataclass(frozen=True, slots=True)
