@@ -414,7 +414,7 @@ h1 {
 }
 
 .card-visual {
-  height: 190px;
+  height: 230px;
   padding: 16px;
   position: relative;
   overflow: hidden;
@@ -424,13 +424,17 @@ h1 {
 .card-visual.has-photo::before,
 .card-visual.has-photo::after { display: none; }
 
+.card-visual.has-photo {
+  padding: 0;
+  background: #eee8e7;
+}
+
 .card-photo {
-  width: calc(100% + 32px);
-  height: calc(100% + 32px);
-  margin: -16px;
+  width: 100%;
+  height: 100%;
+  margin: 0;
   display: block;
-  object-fit: cover;
-  transition: transform 300ms ease;
+  object-fit: contain;
 }
 
 .card-photo.is-hidden,
@@ -484,8 +488,6 @@ h1 {
   background: rgba(24, 18, 19, 0.82);
   font-size: 0.7rem;
 }
-
-.listing-card:hover .card-photo { transform: scale(1.025); }
 
 .card-visual::before,
 .card-visual::after {
@@ -750,7 +752,7 @@ h1 {
   .sort-form label { grid-template-columns: auto 1fr; }
   .sort-form select { width: 100%; }
   .listing-grid { grid-template-columns: 1fr; }
-  .card-visual { height: 210px; }
+  .card-visual { height: 250px; }
   .site-footer { flex-direction: column; }
   .city-picker { width: min(100% - 24px, 1020px); padding-block: 46px 54px; }
   .city-picker-copy h1 { font-size: clamp(3.2rem, 17vw, 5rem); }

@@ -172,6 +172,27 @@ class ListingRepositoryTests(unittest.TestCase):
             self.assertIn("EUR", amsterdam.text)
             self.assertNotIn("CHF 850 / mois", amsterdam.text)
 
+    def test_outside_city_uses_specific_municipality_for_display(self) -> None:
+        connection = sqlite3.connect(self.database)
+        try:
+            connection.execute(
+                """
+                UPDATE listings
+                SET city = ?, neighborhood = ?, location_text = ?
+                WHERE raw_post_key = ?
+                """,
+                ("Pully", "Hors Lausanne", "Pully, près de la gare", "abc123"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        results = ListingRepository(self.database, now=self.now).search(
+            ListingSearch(city="lausanne")
+        )
+
+        self.assertEqual(results[0].location, "Pully")
+
     def test_city_filter_and_two_week_cutoff(self) -> None:
         repository = ListingRepository(self.database, now=self.now)
         self.assertEqual(len(repository.search(ListingSearch(city="lausanne"))), 1)

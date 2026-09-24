@@ -17,7 +17,7 @@ from fb_automator.listing_models import (
 from fb_automator.storage import PostStore
 
 DEFAULT_MODEL = "gpt-5.4-mini"
-EXTRACTION_VERSION = "llm-v6-multi-city"
+EXTRACTION_VERSION = "llm-v7-municipalities"
 
 LAUSANNE_NEIGHBORHOODS = "\n".join(
     f"- {neighborhood.value}" for neighborhood in LausanneNeighborhood
@@ -62,8 +62,10 @@ For target source city Amsterdam, map neighborhood to exactly one of these label
 {AMSTERDAM_NEIGHBORHOODS}
 
 Use the matching Hors city label only when the stated place is clearly outside that municipality.
-Use null rather than guessing when the post does not provide enough location evidence. Set city to
-Amsterdam or Lausanne when the post is in that city; preserve a clearly stated different municipality.
+For an outside listing, preserve the exact municipality in city and make location_text start with that
+municipality (for example Pully, Renens, Lutry, or Amstelveen); never replace a stated municipality with
+"unknown" or the source-group city. Use null rather than guessing when the post does not provide enough
+location evidence. Set city to Amsterdam or Lausanne only when the listing is actually in that city.
 
 Write amenities, particularities, and the summary in French, regardless of the source language.
 Particularities are short, useful French labels such as Femmes uniquement, Femmes de préférence,

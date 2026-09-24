@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Les annonces de logement à {{ city.name }}, triées et filtrables.">
     <title>Chineur2000 · {{ city.name }}</title>
-    <link rel="stylesheet" href="/static/site.css">
-    <script src="/static/site.js" defer></script>
+    <link rel="stylesheet" href="/static/site.css?v={{ asset_version }}">
+    <script src="/static/site.js?v={{ asset_version }}" defer></script>
   </head>
   <body>
     <header class="site-header">
@@ -133,7 +133,7 @@
                   <div class="card-heading">
                     <div>
                       <p class="rent">{{ listing.rent_label }}</p>
-                      <h3>{{ listing.neighborhood or listing.location }}</h3>
+                      <h3>{{ listing.location }}</h3>
                     </div>
                     {% if listing.engagement_label %}
                       <span class="engagement" title="Activité sur Facebook">{{ listing.engagement_label }}</span>

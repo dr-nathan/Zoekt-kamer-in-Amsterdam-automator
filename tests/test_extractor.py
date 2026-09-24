@@ -104,14 +104,14 @@ class ExtractorTests(unittest.TestCase):
         self.assertEqual(len(listing.evidence), 1)
         self.assertEqual(
             listing.extraction_version,
-            "llm-v6-multi-city:test-model",
+            "llm-v7-municipalities:test-model",
         )
         call = client.responses.calls[0]
         self.assertIs(call["text_format"], ExtractedListing)
         self.assertFalse(call["store"])
         self.assertEqual(
             call["prompt_cache_key"],
-            "fb-housing:llm-v6-multi-city:test-model",
+            "fb-housing:llm-v7-municipalities:test-model",
         )
         self.assertEqual(call["input"][0]["role"], "developer")
         self.assertIn("untrusted data", call["input"][0]["content"])
@@ -170,7 +170,7 @@ class ExtractorTests(unittest.TestCase):
                 "offer",
                 900,
                 "Chambre à Sous-Gare avec domiciliation possible.",
-                "llm-v6-multi-city:test-model",
+                "llm-v7-municipalities:test-model",
             ),
         )
         self.assertEqual(len(client.responses.calls), 1)

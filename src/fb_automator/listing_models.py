@@ -180,7 +180,12 @@ class ExtractedListing(BaseModel):
     deposit_months: float | None = Field(ge=0)
     room_size_m2: float | None = Field(ge=0)
     property_size_m2: float | None = Field(ge=0)
-    location_text: str | None = Field(description="Most useful stated location for display.")
+    location_text: str | None = Field(
+        description=(
+            "Most useful stated location for display, starting with the exact municipality when "
+            "the listing is outside the configured source city."
+        )
+    )
     city: str | None
     neighborhood: LausanneNeighborhood | AmsterdamNeighborhood | None = Field(
         description=(

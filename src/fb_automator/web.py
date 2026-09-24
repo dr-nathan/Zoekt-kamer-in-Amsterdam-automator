@@ -20,6 +20,7 @@ from fb_automator.listing_models import AmsterdamNeighborhood, LausanneNeighborh
 
 DEFAULT_DATABASE = Path("data/listings.db")
 ASSET_ROOT = Path(__file__).parent / "web_assets"
+ASSET_VERSION = "20260924-2"
 LISTING_MAX_AGE_DAYS = 14
 
 
@@ -44,6 +45,15 @@ CITIES = {
         currency="CHF",
         neighborhoods=tuple(item.value for item in LausanneNeighborhood),
     ),
+}
+
+UNKNOWN_LOCATION_VALUES = {
+    "unknown",
+    "unknown location",
+    "inconnu",
+    "lieu inconnu",
+    "non précisé",
+    "not specified",
 }
 
 
@@ -268,7 +278,7 @@ class ListingRepository:
 
     def _to_card(self, row: sqlite3.Row) -> ListingCard:
         city = CITIES.get(row["source_city"], CITIES["lausanne"])
-        location = row["location_text"] or row["neighborhood"] or row["city"] or city.name
+        location = _display_location(row, city)
         key = row["raw_post_key"]
         image_records = tuple(
             (position, url)
@@ -422,6 +432,7 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
                     {"slug": city.slug, "name": city.name, "count": counts[city.slug]}
                     for city in CITIES.values()
                 ],
+                asset_version=ASSET_VERSION,
                 database_ready=database_path.exists(),
             )
         )
@@ -458,6 +469,7 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
                 filters=filters,
                 city=city,
                 cities=tuple(CITIES.values()),
+                asset_version=ASSET_VERSION,
                 particularities=repository.particularities(city.slug),
                 neighborhoods=city.neighborhoods,
                 active_filter_count=sum(
@@ -519,6 +531,34 @@ def _safe_url(value: str | None) -> str | None:
     if parsed.scheme in {"http", "https"} and parsed.netloc:
         return value
     return None
+
+
+def _display_location(row: sqlite3.Row, source_city: CityConfig) -> str:
+    location_text = _clean_location(row["location_text"])
+    municipality = _clean_location(row["city"])
+    neighborhood = _clean_location(row["neighborhood"])
+    outside_label = f"hors {source_city.name}".casefold()
+
+    if neighborhood and neighborhood.casefold() == outside_label:
+        if municipality and municipality.casefold() not in {
+            source_city.name.casefold(),
+            outside_label,
+        }:
+            return municipality
+        if location_text:
+            return location_text
+        return neighborhood
+
+    return neighborhood or location_text or municipality or source_city.name
+
+
+def _clean_location(value: str | None) -> str | None:
+    if not value:
+        return None
+    cleaned = " ".join(value.split())
+    if cleaned.casefold() in UNKNOWN_LOCATION_VALUES:
+        return None
+    return cleaned
 
 
 def _display_date(value: str) -> str:
