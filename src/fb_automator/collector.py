@@ -439,7 +439,10 @@ class FacebookCollector:
                 // Marketplace-style listing cards are separate from the authored
                 // post body. Their outer link contains an action button and carries
                 // structured text such as price, municipality, and listing title.
-                const embeddedListingText = [...content.querySelectorAll('a, [role="link"]')]
+                const embeddedListingText = [...linkContainer.querySelectorAll(
+                  'a, [role="link"]'
+                )]
+                  .filter((link) => !link.closest('[role="article"]'))
                   .filter((link) => link.querySelector('button, [role="button"]'))
                   .map((link) => (link.innerText || link.textContent || '').trim())
                   .filter((value) => value.length >= 8 && value.length <= 800)

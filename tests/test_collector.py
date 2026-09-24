@@ -69,9 +69,13 @@ class PostUrlTests(unittest.TestCase):
         html = """
         <section>
           <a href="https://www.facebook.com/groups/123/posts/456">2 h</a>
-          <blockquote>
-            Studio lumineux de 30 m² à Lausanne, disponible dès novembre.
-          </blockquote>
+          <div class="media-shell">
+            <blockquote>
+              Studio lumineux de 30 m² à Lausanne, disponible dès novembre.
+            </blockquote>
+            <img src="https://scontent.example.fbcdn.net/room.jpg"
+                 width="320" height="200" alt="Studio">
+          </div>
           <a href="#" role="link">
             <span>CHF1,300 · Lausanne, VD · Studio 30 m²</span>
             <button type="button">Message</button>
