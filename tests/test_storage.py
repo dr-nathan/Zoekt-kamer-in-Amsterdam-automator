@@ -19,6 +19,7 @@ class PostStoreTests(unittest.TestCase):
             reaction_count=4,
             comment_count=2,
             source_city="lausanne",
+            embedded_listing_text="CHF1,300 · Lausanne, VD",
         )
         second = RawPost(
             group_name="Housing",
@@ -38,7 +39,7 @@ class PostStoreTests(unittest.TestCase):
                 self.assertEqual(store.upsert([second])[:2], (0, 1))
                 self.assertEqual(store.count(), 1)
                 row = store.connection.execute(
-                    """SELECT text, first_seen_at, last_seen_at,
+                    """SELECT text, embedded_listing_text, first_seen_at, last_seen_at,
                               reaction_count, comment_count
                        FROM raw_posts"""
                 ).fetchone()
@@ -64,6 +65,7 @@ class PostStoreTests(unittest.TestCase):
             row,
             (
                 "A room is available (edited)",
+                "CHF1,300 · Lausanne, VD",
                 "2026-09-16T10:00:00+00:00",
                 "2026-09-16T11:00:00+00:00",
                 9,

@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS raw_posts (
     post_id TEXT,
     post_url TEXT,
     text TEXT NOT NULL,
+    embedded_listing_text TEXT NOT NULL DEFAULT '',
     published_label TEXT,
     reaction_count INTEGER,
     comment_count INTEGER,
@@ -131,6 +132,7 @@ class PostStore:
             "comment_count": "INTEGER",
             "content_hash": "TEXT NOT NULL DEFAULT ''",
             "source_city": "TEXT NOT NULL DEFAULT ''",
+            "embedded_listing_text": "TEXT NOT NULL DEFAULT ''",
         }
         with self.connection:
             for name, declaration in additions.items():
@@ -226,14 +228,20 @@ class PostStore:
                     """
                     INSERT INTO raw_posts (
                         dedupe_key, content_hash, source_city, group_name, group_url, post_id, post_url,
-                        text, published_label, reaction_count, comment_count,
+                        text, embedded_listing_text, published_label, reaction_count, comment_count,
                         first_seen_at, last_seen_at, raw_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(dedupe_key) DO UPDATE SET
                         content_hash = excluded.content_hash,
                         source_city = COALESCE(NULLIF(excluded.source_city, ''), raw_posts.source_city),
                         post_url = COALESCE(raw_posts.post_url, excluded.post_url),
                         text = excluded.text,
+                        embedded_listing_text = CASE
+                            WHEN length(excluded.embedded_listing_text) >=
+                                 length(raw_posts.embedded_listing_text)
+                            THEN excluded.embedded_listing_text
+                            ELSE raw_posts.embedded_listing_text
+                        END,
                         published_label = COALESCE(
                             excluded.published_label, raw_posts.published_label
                         ),
@@ -255,6 +263,7 @@ class PostStore:
                         post.post_id,
                         post.post_url,
                         post.text,
+                        post.embedded_listing_text,
                         post.published_label,
                         post.reaction_count,
                         post.comment_count,
@@ -339,7 +348,8 @@ class PostStore:
     def raw_posts_for_extraction(self) -> list[dict[str, str | None]]:
         rows = self.connection.execute(
             """
-            SELECT r.dedupe_key, r.text, r.source_city, r.last_seen_at,
+            SELECT r.dedupe_key, r.text, r.embedded_listing_text,
+                   r.source_city, r.last_seen_at,
                    l.source_hash, l.extraction_version
             FROM raw_posts AS r
             LEFT JOIN listings AS l ON l.raw_post_key = r.dedupe_key
@@ -350,12 +360,21 @@ class PostStore:
             {
                 "dedupe_key": key,
                 "text": text,
+                "embedded_listing_text": embedded_listing_text,
                 "source_city": source_city,
                 "last_seen_at": last_seen_at,
                 "source_hash": source_hash,
                 "extraction_version": extraction_version,
             }
-            for key, text, source_city, last_seen_at, source_hash, extraction_version in rows
+            for (
+                key,
+                text,
+                embedded_listing_text,
+                source_city,
+                last_seen_at,
+                source_hash,
+                extraction_version,
+            ) in rows
         ]
 
     def listings_for_image_review(self) -> list[dict[str, object]]:

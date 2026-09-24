@@ -104,20 +104,43 @@ class ExtractorTests(unittest.TestCase):
         self.assertEqual(len(listing.evidence), 1)
         self.assertEqual(
             listing.extraction_version,
-            "llm-v7-municipalities:test-model",
+            "llm-v8-embedded-listings:test-model",
         )
         call = client.responses.calls[0]
         self.assertIs(call["text_format"], ExtractedListing)
         self.assertFalse(call["store"])
         self.assertEqual(
             call["prompt_cache_key"],
-            "fb-housing:llm-v7-municipalities:test-model",
+            "fb-housing:llm-v8-embedded-listings:test-model",
         )
         self.assertEqual(call["input"][0]["role"], "developer")
         self.assertIn("untrusted data", call["input"][0]["content"])
         self.assertIn(
                 "Facebook comments, replies, reactions",
             call["input"][0]["content"],
+        )
+
+    def test_includes_embedded_listing_card_in_llm_context(self) -> None:
+        client = FakeClient()
+        listing = LLMListingExtractor(model="test-model", client=client).extract(
+            "post-key",
+            "Studio disponible à Lausanne avec cuisine équipée.",
+            "2026-09-24T10:00:00+00:00",
+            "lausanne",
+            "CHF1,300 · Lausanne, VD · Studio 30 m² · Message",
+        )
+
+        user_content = client.responses.calls[0]["input"][1]["content"]
+        self.assertIn("<facebook_embedded_listing_card>", user_content)
+        self.assertIn("CHF1,300", user_content)
+        self.assertNotEqual(
+            listing.source_hash,
+            LLMListingExtractor(model="test-model", client=FakeClient()).extract(
+                "post-key",
+                "Studio disponible à Lausanne avec cuisine équipée.",
+                "2026-09-24T10:00:00+00:00",
+                "lausanne",
+            ).source_hash,
         )
 
     def test_database_extraction_is_cached_by_content_and_model(self) -> None:
@@ -170,7 +193,7 @@ class ExtractorTests(unittest.TestCase):
                 "offer",
                 900,
                 "Chambre à Sous-Gare avec domiciliation possible.",
-                "llm-v7-municipalities:test-model",
+                "llm-v8-embedded-listings:test-model",
             ),
         )
         self.assertEqual(len(client.responses.calls), 1)

@@ -23,6 +23,7 @@ class RawPost:
     comment_count: int | None = None
     image_urls: tuple[str, ...] = ()
     source_city: str = ""
+    embedded_listing_text: str = ""
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)

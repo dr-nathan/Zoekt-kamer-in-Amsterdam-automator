@@ -106,6 +106,11 @@ def merge_post_observations(previous: RawPost | None, current: RawPost) -> RawPo
     if previous is None:
         return current
     content = current if len(current.text) > len(previous.text) else previous
+    embedded = (
+        current.embedded_listing_text
+        if len(current.embedded_listing_text) > len(previous.embedded_listing_text)
+        else previous.embedded_listing_text
+    )
     return replace(
         content,
         scraped_at=current.scraped_at,
@@ -121,6 +126,7 @@ def merge_post_observations(previous: RawPost | None, current: RawPost) -> RawPo
         ),
         image_urls=current.image_urls or previous.image_urls,
         source_city=current.source_city or previous.source_city,
+        embedded_listing_text=embedded,
     )
 
 
@@ -430,8 +436,19 @@ class FacebookCollector:
                   .map((image) => image.src)
                   .filter((src, index, all) => all.indexOf(src) === index)
                   .slice(0, 3);
+                // Marketplace-style listing cards are separate from the authored
+                // post body. Their outer link contains an action button and carries
+                // structured text such as price, municipality, and listing title.
+                const embeddedListingText = [...content.querySelectorAll('a, [role="link"]')]
+                  .filter((link) => link.querySelector('button, [role="button"]'))
+                  .map((link) => (link.innerText || link.textContent || '').trim())
+                  .filter((value) => value.length >= 8 && value.length <= 800)
+                  .filter((value, index, all) => all.indexOf(value) === index)
+                  .slice(0, 3)
+                  .join('\n---\n');
                 return {
                   text,
+                  embedded_listing_text: embeddedListingText,
                   links,
                   engagement,
                   images
@@ -472,6 +489,9 @@ class FacebookCollector:
                         str(url) for url in item.get("images", []) if str(url)
                     ),
                     source_city=group.city,
+                    embedded_listing_text=str(
+                        item.get("embedded_listing_text", "")
+                    ).strip(),
                 )
             )
         return posts
