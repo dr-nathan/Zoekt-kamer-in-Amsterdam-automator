@@ -120,6 +120,7 @@ def merge_post_observations(previous: RawPost | None, current: RawPost) -> RawPo
             else previous.comment_count
         ),
         image_urls=current.image_urls or previous.image_urls,
+        source_city=current.source_city or previous.source_city,
     )
 
 
@@ -470,6 +471,7 @@ class FacebookCollector:
                     image_urls=tuple(
                         str(url) for url in item.get("images", []) if str(url)
                     ),
+                    source_city=group.city,
                 )
             )
         return posts

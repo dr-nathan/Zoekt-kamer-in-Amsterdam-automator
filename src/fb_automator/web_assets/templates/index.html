@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Les annonces de logement lausannoises, triées et filtrables.">
-    <title>Chineur2000 · Lausanne</title>
+    <meta name="description" content="Les annonces de logement à {{ city.name }}, triées et filtrables.">
+    <title>Chineur2000 · {{ city.name }}</title>
     <link rel="stylesheet" href="/static/site.css">
     <script src="/static/site.js" defer></script>
   </head>
@@ -14,23 +14,23 @@
         <span class="brand-mark" aria-hidden="true">C</span>
         <span>Chineur<span>2000</span></span>
       </a>
-      <div class="header-meta">
+      <a class="header-meta city-change" href="/">
         <span class="pulse" aria-hidden="true"></span>
-        Veille privée · Lausanne
-      </div>
+        {{ city.name }} · Changer de ville
+      </a>
     </header>
 
     <main>
       <section class="intro shell">
         <div>
-          <p class="eyebrow">Les groupes lausannois, enfin triés</p>
+          <p class="eyebrow">Les groupes de {{ city.name }}, enfin triés</p>
           <h1>Chineur de pur chambres et apparts Facebook 💯</h1>
         </div>
-        <p class="intro-copy">Les annonces récentes des groupes que vous suivez, rassemblées en un seul endroit et classées par quartier.</p>
+        <p class="intro-copy">Les annonces des {{ max_age_days }} derniers jours, rassemblées en un seul endroit et classées par quartier.</p>
       </section>
 
       <section class="search-wrap shell" aria-label="Filtrer les annonces">
-        <form class="search-panel" method="get" action="/">
+        <form class="search-panel" method="get" action="/ville/{{ city.slug }}">
           <label class="field field-area select-field">
             <span>Quartier</span>
             <select name="area">
@@ -42,7 +42,7 @@
           </label>
           <label class="field">
             <span>Loyer maximum</span>
-            <span class="input-prefix">CHF</span>
+            <span class="input-prefix">{{ city.currency }}</span>
             <input class="has-prefix currency-prefix" name="max_rent" type="number" min="0" max="10000" step="50" placeholder="1’500" value="{{ filters.max_rent if filters.max_rent is not none else '' }}">
           </label>
           <label class="field">
@@ -77,7 +77,7 @@
             <button class="text-button" type="button" data-filter-toggle aria-expanded="{{ 'true' if active_filter_count > 3 else 'false' }}" aria-controls="advanced-filters">
               Plus de filtres{% if active_filter_count %} <strong>{{ active_filter_count }}</strong>{% endif %}
             </button>
-            {% if active_filter_count %}<a class="clear-link" href="/">Réinitialiser</a>{% endif %}
+            {% if active_filter_count %}<a class="clear-link" href="/ville/{{ city.slug }}">Réinitialiser</a>{% endif %}
           </div>
         </form>
       </section>
@@ -88,7 +88,7 @@
             <p class="eyebrow">Les trouvailles du moment</p>
             <h2 id="results-heading">{{ listings|length }} annonce{{ '' if listings|length == 1 else 's' }} à parcourir</h2>
           </div>
-          <form class="sort-form" method="get" action="/">
+          <form class="sort-form" method="get" action="/ville/{{ city.slug }}">
             <input type="hidden" name="area" value="{{ filters.area }}">
             {% if filters.max_rent is not none %}<input type="hidden" name="max_rent" value="{{ filters.max_rent }}">{% endif %}
             {% if filters.min_size is not none %}<input type="hidden" name="min_size" value="{{ filters.min_size }}">{% endif %}
@@ -172,13 +172,13 @@
             <span aria-hidden="true">⌁</span>
             <h3>Aucune annonce ne correspond à ces filtres.</h3>
             <p>Élargissez le loyer, la surface ou le quartier, puis relancez la recherche.</p>
-            <a class="secondary-button" href="/">Réinitialiser les filtres</a>
+            <a class="secondary-button" href="/ville/{{ city.slug }}">Réinitialiser les filtres</a>
           </div>
         {% else %}
           <div class="empty-state">
             <span aria-hidden="true">⌁</span>
             <h3>Le flux attend sa première collecte.</h3>
-            <p>Les annonces lausannoises apparaîtront ici dès que la collecte sera terminée.</p>
+            <p>Les annonces de {{ city.name }} apparaîtront ici dès que la collecte sera terminée.</p>
           </div>
         {% endif %}
       </section>

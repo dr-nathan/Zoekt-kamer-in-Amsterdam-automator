@@ -43,6 +43,12 @@ class UtilitiesStatus(StrEnum):
     UNKNOWN = "unknown"
 
 
+class Currency(StrEnum):
+    CHF = "CHF"
+    EUR = "EUR"
+    UNKNOWN = "unknown"
+
+
 class GenderRequirement(StrEnum):
     WOMEN = "women"
     MEN = "men"
@@ -79,6 +85,21 @@ class LausanneNeighborhood(StrEnum):
     BEAULIEU_GREY_BOISY = "Beaulieu / Grey / Boisy"
     ZONES_FORAINES = "Zones foraines"
     OUTSIDE_LAUSANNE = "Hors Lausanne"
+
+
+class AmsterdamNeighborhood(StrEnum):
+    """Stable city districts used to normalize Amsterdam housing posts."""
+
+    CENTRUM = "Centrum"
+    WEST = "West"
+    NIEUW_WEST = "Nieuw-West"
+    ZUID = "Zuid"
+    OOST = "Oost"
+    NOORD = "Noord"
+    ZUIDOOST = "Zuidoost"
+    WESTPOORT = "Westpoort"
+    WEESP = "Weesp"
+    OUTSIDE_AMSTERDAM = "Hors Amsterdam"
 
 
 class InternationalStatus(StrEnum):
@@ -149,21 +170,22 @@ class ExtractedListing(BaseModel):
         )
     )
     monthly_rent: float | None = Field(
-        ge=0, description="Monthly rent in Swiss francs, excluding deposits."
+        ge=0, description="Monthly rent in the stated currency, excluding deposits."
     )
+    currency: Currency
     utilities: UtilitiesStatus
     deposit_amount: float | None = Field(
-        ge=0, description="Deposit in Swiss francs, if explicitly stated."
+        ge=0, description="Deposit in the stated currency, if explicitly stated."
     )
     deposit_months: float | None = Field(ge=0)
     room_size_m2: float | None = Field(ge=0)
     property_size_m2: float | None = Field(ge=0)
     location_text: str | None = Field(description="Most useful stated location for display.")
     city: str | None
-    neighborhood: LausanneNeighborhood | None = Field(
+    neighborhood: LausanneNeighborhood | AmsterdamNeighborhood | None = Field(
         description=(
-            "Official Lausanne statistical neighborhood, Hors Lausanne when clearly outside "
-            "the municipality, or null when it cannot be established from the post."
+            "Standardized neighborhood for the configured source city, the matching Hors city "
+            "label when clearly outside it, or null when it cannot be established."
         )
     )
     available_from: str | None = Field(description="ISO date YYYY-MM-DD, or null.")
@@ -209,6 +231,7 @@ class ListingAttributes:
     source_hash: str
     listing_kind: ListingKind
     monthly_rent: float | None
+    currency: Currency
     utilities: UtilitiesStatus
     deposit_amount: float | None
     deposit_months: float | None
@@ -216,7 +239,7 @@ class ListingAttributes:
     property_size_m2: float | None
     location_text: str | None
     city: str | None
-    neighborhood: LausanneNeighborhood | None
+    neighborhood: LausanneNeighborhood | AmsterdamNeighborhood | None
     available_from: str | None
     available_to: str | None
     lease_type: LeaseType

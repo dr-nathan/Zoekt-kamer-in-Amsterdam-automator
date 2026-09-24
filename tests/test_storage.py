@@ -18,6 +18,7 @@ class PostStoreTests(unittest.TestCase):
             scraped_at="2026-09-16T10:00:00+00:00",
             reaction_count=4,
             comment_count=2,
+            source_city="lausanne",
         )
         second = RawPost(
             group_name="Housing",
@@ -29,6 +30,7 @@ class PostStoreTests(unittest.TestCase):
             scraped_at="2026-09-16T11:00:00+00:00",
             reaction_count=9,
             comment_count=5,
+            source_city="lausanne",
         )
         with tempfile.TemporaryDirectory() as directory:
             with PostStore(Path(directory) / "posts.db") as store:
@@ -93,6 +95,7 @@ class PostStoreTests(unittest.TestCase):
             text="Chambre à Lausanne, CHF 900.",
             published_label=None,
             scraped_at="2026-09-17T10:00:00+00:00",
+            source_city="lausanne",
         )
         cross_post = RawPost(
             group_name="Group two",
@@ -102,6 +105,7 @@ class PostStoreTests(unittest.TestCase):
             text=first.text,
             published_label=None,
             scraped_at="2026-09-17T11:00:00+00:00",
+            source_city="lausanne",
         )
         with tempfile.TemporaryDirectory() as directory:
             with PostStore(Path(directory) / "posts.db") as store:
@@ -114,6 +118,33 @@ class PostStoreTests(unittest.TestCase):
                     second_result[2][dedupe_key(cross_post)],
                     dedupe_key(first),
                 )
+
+    def test_does_not_merge_identical_text_across_cities(self) -> None:
+        lausanne = RawPost(
+            group_name="Lausanne housing",
+            group_url="https://www.facebook.com/groups/1/",
+            post_id="101",
+            post_url="https://www.facebook.com/groups/1/posts/101",
+            text="Room available immediately.",
+            published_label=None,
+            scraped_at="2026-09-24T10:00:00+00:00",
+            source_city="lausanne",
+        )
+        amsterdam = RawPost(
+            group_name="Amsterdam housing",
+            group_url="https://www.facebook.com/groups/2/",
+            post_id="202",
+            post_url="https://www.facebook.com/groups/2/posts/202",
+            text=lausanne.text,
+            published_label=None,
+            scraped_at="2026-09-24T10:01:00+00:00",
+            source_city="amsterdam",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            with PostStore(Path(directory) / "posts.db") as store:
+                self.assertEqual(store.upsert([lausanne])[:2], (1, 0))
+                self.assertEqual(store.upsert([amsterdam])[:2], (1, 0))
+                self.assertEqual(store.count(), 2)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ from fb_automator.listing_models import (
     AttributeEvidence,
     EvidenceField,
     EvidenceStrength,
+    Currency,
     ExtractedListing,
     FurnishingStatus,
     GenderRequirement,
@@ -29,6 +30,7 @@ def model_result() -> ExtractedListing:
     return ExtractedListing(
         listing_kind=ListingKind.OFFER,
         monthly_rent=900,
+        currency=Currency.CHF,
         utilities=UtilitiesStatus.INCLUDED,
         deposit_amount=None,
         deposit_months=None,
@@ -92,19 +94,19 @@ class ExtractorTests(unittest.TestCase):
         self.assertEqual(len(listing.evidence), 1)
         self.assertEqual(
             listing.extraction_version,
-            "llm-v5-lausanne-post-integrity:test-model",
+            "llm-v6-multi-city:test-model",
         )
         call = client.responses.calls[0]
         self.assertIs(call["text_format"], ExtractedListing)
         self.assertFalse(call["store"])
         self.assertEqual(
             call["prompt_cache_key"],
-            "fb-housing:llm-v5-lausanne-post-integrity:test-model",
+            "fb-housing:llm-v6-multi-city:test-model",
         )
         self.assertEqual(call["input"][0]["role"], "developer")
         self.assertIn("untrusted data", call["input"][0]["content"])
         self.assertIn(
-            "Facebook comments, replies, reactions",
+                "Facebook comments, replies, reactions",
             call["input"][0]["content"],
         )
 
@@ -144,10 +146,13 @@ class ExtractorTests(unittest.TestCase):
                 extract_database(database, model="test-model", client=client),
                 (0, 1, 0, 1),
             )
-            with sqlite3.connect(database) as connection:
+            connection = sqlite3.connect(database)
+            try:
                 row = connection.execute(
                     "SELECT listing_kind, monthly_rent, summary, extraction_version FROM listings"
                 ).fetchone()
+            finally:
+                connection.close()
 
         self.assertEqual(
             row,
@@ -155,7 +160,7 @@ class ExtractorTests(unittest.TestCase):
                 "offer",
                 900,
                 "Chambre à Sous-Gare avec domiciliation possible.",
-                "llm-v5-lausanne-post-integrity:test-model",
+                "llm-v6-multi-city:test-model",
             ),
         )
         self.assertEqual(len(client.responses.calls), 1)

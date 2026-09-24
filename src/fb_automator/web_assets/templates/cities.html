@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Choisissez Amsterdam ou Lausanne pour parcourir les annonces Facebook récentes.">
+    <title>Chineur2000 · Choisir une ville</title>
+    <link rel="stylesheet" href="/static/site.css">
+  </head>
+  <body class="city-picker-page">
+    <header class="site-header city-picker-header">
+      <a class="brand" href="/" aria-label="Accueil Chineur2000">
+        <span class="brand-mark" aria-hidden="true">C</span>
+        <span>Chineur<span>2000</span></span>
+      </a>
+      <div class="header-meta">
+        <span class="pulse" aria-hidden="true"></span>
+        Veille privée
+      </div>
+    </header>
+
+    <main class="city-picker shell">
+      <div class="city-picker-copy">
+        <p class="eyebrow">Où cherchez-vous&nbsp;?</p>
+        <h1>Choisissez votre ville.</h1>
+        <p>Les annonces Facebook récentes, triées par quartier et retirées automatiquement après deux semaines.</p>
+      </div>
+
+      <div class="city-options" aria-label="Choisir une ville">
+        {% for city in cities %}
+          <a class="city-option city-option-{{ city.slug }}" href="/ville/{{ city.slug }}">
+            <span class="city-number">0{{ loop.index }}</span>
+            <span class="city-name">{{ city.name }}</span>
+            <span class="city-count">
+              {% if database_ready %}
+                {{ city.count }} annonce{{ '' if city.count == 1 else 's' }} récente{{ '' if city.count == 1 else 's' }}
+              {% else %}
+                En attente de collecte
+              {% endif %}
+            </span>
+            <span class="city-arrow" aria-hidden="true">↗</span>
+          </a>
+        {% endfor %}
+      </div>
+    </main>
+
+    <footer class="site-footer shell city-picker-footer">
+      <span>Chineur2000 · outil de veille personnel</span>
+      <span>Amsterdam + Lausanne</span>
+    </footer>
+  </body>
+</html>

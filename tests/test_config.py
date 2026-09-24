@@ -12,18 +12,41 @@ class GroupConfigTests(unittest.TestCase):
             path = Path(directory) / "groups.json"
             path.write_text(
                 json.dumps(
-                    [{"name": "Housing", "url": "https://www.facebook.com/groups/123/"}]
+                    [{
+                        "name": "Housing",
+                        "url": "https://www.facebook.com/groups/123/",
+                        "city": "amsterdam",
+                    }]
                 ),
                 encoding="utf-8",
             )
             groups = load_groups(path)
         self.assertEqual(groups[0].name, "Housing")
+        self.assertEqual(groups[0].city, "amsterdam")
 
     def test_rejects_non_group_url(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "groups.json"
             path.write_text(
-                json.dumps([{"name": "Not a group", "url": "https://example.com/"}]),
+                json.dumps([{
+                    "name": "Not a group",
+                    "url": "https://example.com/",
+                    "city": "lausanne",
+                }]),
+                encoding="utf-8",
+            )
+            with self.assertRaises(ValueError):
+                load_groups(path)
+
+    def test_rejects_unknown_city(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "groups.json"
+            path.write_text(
+                json.dumps([{
+                    "name": "Housing",
+                    "url": "https://www.facebook.com/groups/123/",
+                    "city": "rotterdam",
+                }]),
                 encoding="utf-8",
             )
             with self.assertRaises(ValueError):

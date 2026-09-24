@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 class GroupSource:
     name: str
     url: str
+    city: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +22,7 @@ class RawPost:
     reaction_count: int | None = None
     comment_count: int | None = None
     image_urls: tuple[str, ...] = ()
+    source_city: str = ""
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)

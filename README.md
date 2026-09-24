@@ -1,4 +1,4 @@
-# Chineur2000 · collecteur de logements lausannois
+# Chineur2000 · collecteur de logements Amsterdam + Lausanne
 
 This experimental branch is rebuilding the original script as a private pipeline:
 
@@ -25,7 +25,8 @@ Create the private group configuration:
 cp config/groups.example.json config/groups.json
 ```
 
-Edit `config/groups.json` and add each group name and URL. This file is intentionally ignored.
+Edit `config/groups.json` and add each group name, URL, and its `amsterdam` or `lausanne`
+city identifier. This file is intentionally ignored.
 
 ## First login
 
@@ -76,10 +77,10 @@ fb-housing extract
 ```
 
 The extractor sends each pending post to the OpenAI Responses API with Structured Outputs and
-writes the validated result to the normalized `listings` table. It extracts price in CHF, size, location,
+writes the validated result to the normalized `listings` table. It extracts monthly rent and currency, size, location,
 availability, registration, contract, furnishing, applicant requirements, amenities, a short
 French summary, and concise French Particularities labels. Locations are normalized by the model
-to Lausanne's official statistical neighborhoods. Every material field keeps a supporting quote and
+to a stable Amsterdam or Lausanne neighborhood set. Every material field keeps a supporting quote and
 confidence score. Raw captured posts remain unchanged.
 
 The default model is `gpt-5.4-mini`. Override it with `OPENAI_MODEL` or `--model`. Results are cached
@@ -113,10 +114,11 @@ Start the private web interface after collecting and extracting posts:
 fb-housing serve
 ```
 
-Open `http://127.0.0.1:8000`. The French interface reads the same SQLite database and offers filters
-for official Lausanne neighborhood, maximum rent, minimum room size, registration and extracted particularities. Results can be
-sorted by collection time, price or Facebook engagement. The website never shows raw post text and
-links back to Facebook for the original context.
+Open `http://127.0.0.1:8000`. The French interface first asks for Amsterdam or Lausanne, then offers
+city-specific neighborhood and currency filters, maximum rent, minimum room size, registration and
+extracted particularities. Results can be sorted by discovery time, price or Facebook engagement.
+Listings disappear from the website 14 days after first collection without being deleted from SQLite.
+The website never shows raw post text and links back to Facebook for the original context.
 
 Override the defaults when needed:
 

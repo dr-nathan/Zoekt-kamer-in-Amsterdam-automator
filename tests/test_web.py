@@ -3,7 +3,10 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
+
+from fastapi.testclient import TestClient
 
 from fb_automator.storage import SCHEMA
 from fb_automator.web import ListingRepository, ListingSearch, _optional_int, create_app
@@ -13,18 +16,19 @@ class ListingRepositoryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.database = Path(self.temporary.name) / "listings.db"
+        self.now = datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc)
         connection = sqlite3.connect(self.database)
         connection.executescript(SCHEMA)
         connection.execute(
             """
             INSERT INTO raw_posts (
-                dedupe_key, group_name, group_url, post_id, post_url, text,
+                dedupe_key, source_city, group_name, group_url, post_id, post_url, text,
                 published_label, reaction_count, comment_count, first_seen_at,
                 last_seen_at, raw_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                "abc123", "Logements Lausanne", "https://facebook.com/groups/example",
+                "abc123", "lausanne", "Logements Lausanne", "https://facebook.com/groups/example",
                 "42", "https://facebook.com/groups/example/posts/42", "room",
                 "Today", 12, 4, "2026-09-17T09:00:00+00:00",
                 "2026-09-17T10:00:00+00:00", "{}",
@@ -76,7 +80,7 @@ class ListingRepositoryTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_filters_and_formats_room(self) -> None:
-        results = ListingRepository(self.database).search(
+        results = ListingRepository(self.database, now=self.now).search(
             ListingSearch(
                 area="Sous-Gare / Ouchy",
                 max_rent=900,
@@ -91,7 +95,9 @@ class ListingRepositoryTests(unittest.TestCase):
         self.assertEqual(results[0].image_url, "/media/abc123/0-room.jpg")
 
     def test_excluding_filter_returns_no_rooms(self) -> None:
-        results = ListingRepository(self.database).search(ListingSearch(max_rent=700))
+        results = ListingRepository(self.database, now=self.now).search(
+            ListingSearch(max_rent=700)
+        )
         self.assertEqual(results, [])
 
     def test_exact_cross_posts_are_shown_once(self) -> None:
@@ -99,13 +105,13 @@ class ListingRepositoryTests(unittest.TestCase):
         connection.execute(
             """
             INSERT INTO raw_posts (
-                dedupe_key, group_name, group_url, post_id, post_url, text,
+                dedupe_key, source_city, group_name, group_url, post_id, post_url, text,
                 published_label, reaction_count, comment_count, first_seen_at,
                 last_seen_at, raw_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                "duplicate", "Second Lausanne group",
+                "duplicate", "lausanne", "Second Lausanne group",
                 "https://facebook.com/groups/second", "84",
                 "https://facebook.com/groups/second/posts/84", "same cross-post",
                 "Today", 15, 6, "2026-09-17T09:00:00+00:00",
@@ -137,12 +143,49 @@ class ListingRepositoryTests(unittest.TestCase):
         connection.commit()
         connection.close()
 
-        results = ListingRepository(self.database).search(ListingSearch())
+        results = ListingRepository(self.database, now=self.now).search(ListingSearch())
         self.assertEqual(len(results), 1)
 
     def test_app_exposes_home_health_and_static_routes(self) -> None:
-        paths = {getattr(route, "path", None) for route in create_app(self.database).routes}
-        self.assertTrue({"/", "/health", "/static"}.issubset(paths))
+        paths = {
+            getattr(route, "path", None)
+            for route in create_app(self.database, now=self.now).routes
+        }
+        self.assertTrue(
+            {"/", "/ville/{city_slug}", "/health", "/static"}.issubset(paths)
+        )
+
+    def test_city_picker_and_city_pages_render(self) -> None:
+        with TestClient(create_app(self.database, now=self.now)) as client:
+            picker = client.get("/")
+            self.assertEqual(picker.status_code, 200)
+            self.assertIn('/ville/amsterdam', picker.text)
+            self.assertIn('/ville/lausanne', picker.text)
+
+            lausanne = client.get("/ville/lausanne")
+            self.assertEqual(lausanne.status_code, 200)
+            self.assertIn("CHF 850 / mois", lausanne.text)
+
+            amsterdam = client.get("/ville/amsterdam")
+            self.assertEqual(amsterdam.status_code, 200)
+            self.assertIn("EUR", amsterdam.text)
+            self.assertNotIn("CHF 850 / mois", amsterdam.text)
+
+    def test_city_filter_and_two_week_cutoff(self) -> None:
+        repository = ListingRepository(self.database, now=self.now)
+        self.assertEqual(len(repository.search(ListingSearch(city="lausanne"))), 1)
+        self.assertEqual(repository.search(ListingSearch(city="amsterdam")), [])
+
+        connection = sqlite3.connect(self.database)
+        try:
+            connection.execute(
+                "UPDATE raw_posts SET first_seen_at = ? WHERE dedupe_key = ?",
+                ("2026-09-09T11:59:59+00:00", "abc123"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        self.assertEqual(repository.search(ListingSearch(city="lausanne")), [])
 
     def test_empty_number_fields_are_treated_as_unset(self) -> None:
         self.assertIsNone(_optional_int("", maximum=10_000))

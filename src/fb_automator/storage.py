@@ -12,6 +12,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS raw_posts (
     dedupe_key TEXT PRIMARY KEY,
     content_hash TEXT NOT NULL DEFAULT '',
+    source_city TEXT NOT NULL DEFAULT '',
     group_name TEXT NOT NULL,
     group_url TEXT NOT NULL,
     post_id TEXT,
@@ -58,6 +59,7 @@ CREATE TABLE IF NOT EXISTS listings (
     raw_post_key TEXT PRIMARY KEY,
     listing_kind TEXT NOT NULL,
     monthly_rent REAL,
+    currency TEXT NOT NULL DEFAULT 'CHF',
     utilities TEXT NOT NULL,
     deposit_amount REAL,
     deposit_months REAL,
@@ -118,6 +120,7 @@ class PostStore:
         self.connection.executescript(SCHEMA)
         self._migrate_raw_post_columns()
         self._migrate_listing_columns()
+        self.connection.execute("PRAGMA optimize")
 
     def _migrate_raw_post_columns(self) -> None:
         existing = {
@@ -127,6 +130,7 @@ class PostStore:
             "reaction_count": "INTEGER",
             "comment_count": "INTEGER",
             "content_hash": "TEXT NOT NULL DEFAULT ''",
+            "source_city": "TEXT NOT NULL DEFAULT ''",
         }
         with self.connection:
             for name, declaration in additions.items():
@@ -142,8 +146,26 @@ class PostStore:
                 [(content_hash(text), key) for key, text in rows],
             )
             self.connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_raw_posts_content_hash "
-                "ON raw_posts (content_hash)"
+                """
+                UPDATE raw_posts
+                SET source_city = CASE
+                    WHEN lower(group_name) LIKE '%amsterdam%' THEN 'amsterdam'
+                    WHEN lower(group_name) LIKE '%lausanne%' THEN 'lausanne'
+                    ELSE source_city
+                END
+                WHERE source_city = ''
+                """
+            )
+            self.connection.execute(
+                "DROP INDEX IF EXISTS idx_raw_posts_content_hash"
+            )
+            self.connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_raw_posts_content_city "
+                "ON raw_posts (content_hash, source_city)"
+            )
+            self.connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_raw_posts_city_age "
+                "ON raw_posts (source_city, first_seen_at DESC)"
             )
 
     def _migrate_listing_columns(self) -> None:
@@ -151,6 +173,7 @@ class PostStore:
             row[1] for row in self.connection.execute("PRAGMA table_info(listings)")
         }
         additions = {
+            "currency": "TEXT NOT NULL DEFAULT 'CHF'",
             "city": "TEXT",
             "neighborhood": "TEXT",
             "summary": "TEXT NOT NULL DEFAULT ''",
@@ -188,11 +211,11 @@ class PostStore:
                 content_match = self.connection.execute(
                     """
                     SELECT dedupe_key FROM raw_posts
-                    WHERE content_hash = ?
+                    WHERE content_hash = ? AND source_city = ?
                     ORDER BY first_seen_at
                     LIMIT 1
                     """,
-                    (post_content_hash,),
+                    (post_content_hash, post.source_city),
                 ).fetchone()
                 key = str(content_match[0]) if content_match else proposed_key
                 resolved_keys[proposed_key] = key
@@ -202,12 +225,13 @@ class PostStore:
                 self.connection.execute(
                     """
                     INSERT INTO raw_posts (
-                        dedupe_key, content_hash, group_name, group_url, post_id, post_url,
+                        dedupe_key, content_hash, source_city, group_name, group_url, post_id, post_url,
                         text, published_label, reaction_count, comment_count,
                         first_seen_at, last_seen_at, raw_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(dedupe_key) DO UPDATE SET
                         content_hash = excluded.content_hash,
+                        source_city = COALESCE(NULLIF(excluded.source_city, ''), raw_posts.source_city),
                         post_url = COALESCE(raw_posts.post_url, excluded.post_url),
                         text = excluded.text,
                         published_label = COALESCE(
@@ -225,6 +249,7 @@ class PostStore:
                     (
                         key,
                         post_content_hash,
+                        post.source_city,
                         post.group_name,
                         post.group_url,
                         post.post_id,
@@ -314,7 +339,7 @@ class PostStore:
     def raw_posts_for_extraction(self) -> list[dict[str, str | None]]:
         rows = self.connection.execute(
             """
-            SELECT r.dedupe_key, r.text, r.last_seen_at,
+            SELECT r.dedupe_key, r.text, r.source_city, r.last_seen_at,
                    l.source_hash, l.extraction_version
             FROM raw_posts AS r
             LEFT JOIN listings AS l ON l.raw_post_key = r.dedupe_key
@@ -325,11 +350,12 @@ class PostStore:
             {
                 "dedupe_key": key,
                 "text": text,
+                "source_city": source_city,
                 "last_seen_at": last_seen_at,
                 "source_hash": source_hash,
                 "extraction_version": extraction_version,
             }
-            for key, text, last_seen_at, source_hash, extraction_version in rows
+            for key, text, source_city, last_seen_at, source_hash, extraction_version in rows
         ]
 
     def listings_for_image_review(self) -> list[dict[str, object]]:
@@ -399,7 +425,7 @@ class PostStore:
 
     def upsert_listings(self, listings: list[ListingAttributes]) -> None:
         columns = (
-            "raw_post_key", "listing_kind", "monthly_rent", "utilities",
+            "raw_post_key", "listing_kind", "monthly_rent", "currency", "utilities",
             "deposit_amount", "deposit_months", "room_size_m2", "property_size_m2",
             "location_text", "city", "neighborhood", "available_from",
             "available_to", "lease_type",
@@ -422,6 +448,7 @@ class PostStore:
                 item.raw_post_key,
                 item.listing_kind.value,
                 item.monthly_rent,
+                item.currency.value,
                 item.utilities.value,
                 item.deposit_amount,
                 item.deposit_months,

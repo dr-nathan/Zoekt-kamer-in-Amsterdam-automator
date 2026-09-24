@@ -4,8 +4,9 @@ import hashlib
 import json
 import os
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -15,14 +16,40 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from fb_automator.listing_models import LausanneNeighborhood
+from fb_automator.listing_models import AmsterdamNeighborhood, LausanneNeighborhood
 
 DEFAULT_DATABASE = Path("data/listings.db")
 ASSET_ROOT = Path(__file__).parent / "web_assets"
+LISTING_MAX_AGE_DAYS = 14
+
+
+@dataclass(frozen=True, slots=True)
+class CityConfig:
+    slug: str
+    name: str
+    currency: str
+    neighborhoods: tuple[str, ...]
+
+
+CITIES = {
+    "amsterdam": CityConfig(
+        slug="amsterdam",
+        name="Amsterdam",
+        currency="EUR",
+        neighborhoods=tuple(item.value for item in AmsterdamNeighborhood),
+    ),
+    "lausanne": CityConfig(
+        slug="lausanne",
+        name="Lausanne",
+        currency="CHF",
+        neighborhoods=tuple(item.value for item in LausanneNeighborhood),
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
 class ListingSearch:
+    city: str = "lausanne"
     area: str = ""
     max_rent: int | None = None
     min_size: int | None = None
@@ -38,6 +65,7 @@ class ListingCard:
     location: str
     neighborhood: str | None
     monthly_rent: float | None
+    currency: str
     room_size_m2: float | None
     available_from: str | None
     available_to: str | None
@@ -51,7 +79,7 @@ class ListingCard:
     post_url: str | None
     group_name: str
     published_label: str | None
-    last_seen_at: str
+    first_seen_at: str
     reaction_count: int | None
     comment_count: int | None
     accent: int
@@ -64,7 +92,8 @@ class ListingCard:
         if self.monthly_rent is None:
             return "Loyer non précisé"
         amount = f"{self.monthly_rent:,.0f}".replace(",", "’")
-        return f"CHF {amount} / mois"
+        currency = self.currency if self.currency in {"CHF", "EUR"} else ""
+        return f"{currency} {amount} / mois".strip()
 
     @property
     def size_label(self) -> str:
@@ -94,7 +123,7 @@ class ListingCard:
 
     @property
     def posted_label(self) -> str:
-        parsed = _parse_datetime(self.last_seen_at)
+        parsed = _parse_datetime(self.first_seen_at)
         if parsed is None:
             return "Collectée récemment"
         now = datetime.now(timezone.utc)
@@ -107,22 +136,35 @@ class ListingCard:
 
     @property
     def is_new(self) -> bool:
-        parsed = _parse_datetime(self.last_seen_at)
+        parsed = _parse_datetime(self.first_seen_at)
         if parsed is None:
             return False
         return (datetime.now(timezone.utc) - parsed).total_seconds() < 48 * 3600
 
 
 class ListingRepository:
-    def __init__(self, database: Path):
+    def __init__(self, database: Path, now: datetime | None = None):
         self.database = database
+        self._now = (
+            (lambda: now)
+            if now is not None
+            else (lambda: datetime.now(timezone.utc))
+        )
 
     def search(self, filters: ListingSearch, limit: int = 60) -> list[ListingCard]:
         if not self.database.exists():
             return []
 
-        clauses = ["l.listing_kind = 'offer'"]
-        params: list[Any] = []
+        city = CITIES.get(filters.city)
+        if city is None:
+            return []
+        cutoff = (self._now() - timedelta(days=LISTING_MAX_AGE_DAYS)).isoformat()
+        clauses = [
+            "l.listing_kind = 'offer'",
+            "r.source_city = ?",
+            "r.first_seen_at >= ?",
+        ]
+        params: list[Any] = [city.slug, cutoff]
         if filters.area:
             clauses.append("l.neighborhood = ?")
             params.append(filters.area)
@@ -140,24 +182,24 @@ class ListingRepository:
             params.append(f"%{filters.particularity.lower()}%")
 
         ordering = {
-            "newest": "r.last_seen_at DESC",
-            "rent_asc": "l.monthly_rent IS NULL, l.monthly_rent ASC, r.last_seen_at DESC",
-            "rent_desc": "l.monthly_rent IS NULL, l.monthly_rent DESC, r.last_seen_at DESC",
+            "newest": "r.first_seen_at DESC",
+            "rent_asc": "l.monthly_rent IS NULL, l.monthly_rent ASC, r.first_seen_at DESC",
+            "rent_desc": "l.monthly_rent IS NULL, l.monthly_rent DESC, r.first_seen_at DESC",
             "popular": (
                 "(COALESCE(r.reaction_count, 0) + 2 * COALESCE(r.comment_count, 0)) "
-                "DESC, r.last_seen_at DESC"
+                "DESC, r.first_seen_at DESC"
             ),
-        }.get(filters.sort, "r.last_seen_at DESC")
+        }.get(filters.sort, "r.first_seen_at DESC")
 
         image_expression = "NULL AS image_paths_json"
         try:
-            probe = sqlite3.connect(
+            with closing(sqlite3.connect(
                 f"file:{self.database.resolve()}?mode=ro", uri=True
-            )
-            has_images = probe.execute(
-                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'post_images'"
-            ).fetchone()
-            probe.close()
+            )) as probe:
+                has_images = probe.execute(
+                    "SELECT 1 FROM sqlite_master "
+                    "WHERE type = 'table' AND name = 'post_images'"
+                ).fetchone()
             if has_images:
                 image_expression = """
                     (SELECT json_group_array(
@@ -175,13 +217,15 @@ class ListingRepository:
             pass
 
         query = f"""
-            SELECT l.raw_post_key, l.source_hash, l.monthly_rent, l.utilities, l.room_size_m2,
+            SELECT l.raw_post_key, l.source_hash, l.monthly_rent, l.currency,
+                   l.utilities, l.room_size_m2,
                    l.location_text, l.city, l.neighborhood, l.available_from,
                    l.available_to, l.lease_type, l.registration, l.furnishing,
                    l.amenities_json, l.particularities_json, l.summary,
                    l.primary_image_position, l.image_quality_score,
                    l.image_review_version,
-                   r.post_url, r.group_name, r.published_label, r.last_seen_at,
+                   r.source_city, r.post_url, r.group_name, r.published_label,
+                   r.first_seen_at,
                    r.reaction_count, r.comment_count, {image_expression}
             FROM listings AS l
             JOIN raw_posts AS r ON r.dedupe_key = l.raw_post_key
@@ -191,16 +235,13 @@ class ListingRepository:
         """
         params.append(limit * 4)
         try:
-            connection = sqlite3.connect(
+            with closing(sqlite3.connect(
                 f"file:{self.database.resolve()}?mode=ro", uri=True
-            )
-            connection.row_factory = sqlite3.Row
-            rows = connection.execute(query, params).fetchall()
+            )) as connection:
+                connection.row_factory = sqlite3.Row
+                rows = connection.execute(query, params).fetchall()
         except sqlite3.Error:
             return []
-        finally:
-            if "connection" in locals():
-                connection.close()
         ordered_hashes: list[str] = []
         best_rows: dict[str, sqlite3.Row] = {}
         for row in rows:
@@ -226,7 +267,8 @@ class ListingRepository:
         return [self._to_card(best_rows[key]) for key in ordered_hashes[:limit]]
 
     def _to_card(self, row: sqlite3.Row) -> ListingCard:
-        location = row["location_text"] or row["neighborhood"] or row["city"] or "Lausanne"
+        city = CITIES.get(row["source_city"], CITIES["lausanne"])
+        location = row["location_text"] or row["neighborhood"] or row["city"] or city.name
         key = row["raw_post_key"]
         image_records = tuple(
             (position, url)
@@ -256,6 +298,7 @@ class ListingRepository:
             location=location,
             neighborhood=row["neighborhood"],
             monthly_rent=row["monthly_rent"],
+            currency=row["currency"] or city.currency,
             room_size_m2=row["room_size_m2"],
             available_from=row["available_from"],
             available_to=row["available_to"],
@@ -269,7 +312,7 @@ class ListingRepository:
             post_url=_safe_url(row["post_url"]),
             group_name=row["group_name"],
             published_label=row["published_label"],
-            last_seen_at=row["last_seen_at"],
+            first_seen_at=row["first_seen_at"],
             reaction_count=row["reaction_count"],
             comment_count=row["comment_count"],
             accent=int(hashlib.sha256(key.encode()).hexdigest()[:2], 16) % 5,
@@ -288,33 +331,66 @@ class ListingRepository:
             return None
         return "/media/" + "/".join(quote(part) for part in path.parts[1:])
 
-    def particularities(self) -> list[str]:
+    def particularities(self, city_slug: str) -> list[str]:
         if not self.database.exists():
             return []
+        cutoff = (self._now() - timedelta(days=LISTING_MAX_AGE_DAYS)).isoformat()
         try:
-            connection = sqlite3.connect(
+            with closing(sqlite3.connect(
                 f"file:{self.database.resolve()}?mode=ro", uri=True
-            )
-            rows = connection.execute(
-                "SELECT particularities_json FROM listings WHERE listing_kind = 'offer'"
-            )
-            labels = {
-                label.strip()
-                for row in rows
-                for label in _json_strings(row[0])
-                if label.strip()
-            }
+            )) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT l.particularities_json
+                    FROM listings AS l
+                    JOIN raw_posts AS r ON r.dedupe_key = l.raw_post_key
+                    WHERE l.listing_kind = 'offer'
+                      AND r.source_city = ?
+                      AND r.first_seen_at >= ?
+                    """,
+                    (city_slug, cutoff),
+                )
+                labels = {
+                    label.strip()
+                    for row in rows
+                    for label in _json_strings(row[0])
+                    if label.strip()
+                }
         except sqlite3.Error:
             return []
-        finally:
-            if "connection" in locals():
-                connection.close()
         return sorted(labels, key=str.casefold)
 
+    def city_counts(self) -> dict[str, int]:
+        counts = {slug: 0 for slug in CITIES}
+        if not self.database.exists():
+            return counts
+        cutoff = (self._now() - timedelta(days=LISTING_MAX_AGE_DAYS)).isoformat()
+        try:
+            with closing(sqlite3.connect(
+                f"file:{self.database.resolve()}?mode=ro", uri=True
+            )) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT r.source_city,
+                           COUNT(DISTINCT COALESCE(NULLIF(l.source_hash, ''), l.raw_post_key))
+                    FROM listings AS l
+                    JOIN raw_posts AS r ON r.dedupe_key = l.raw_post_key
+                    WHERE l.listing_kind = 'offer' AND r.first_seen_at >= ?
+                    GROUP BY r.source_city
+                    """,
+                    (cutoff,),
+                )
+            for city_slug, count in rows:
+                if city_slug in counts:
+                    counts[str(city_slug)] = int(count)
+        except sqlite3.Error:
+            pass
+        return counts
 
-def create_app(database: Path | None = None) -> FastAPI:
+
+def create_app(database: Path | None = None, now: datetime | None = None) -> FastAPI:
     database_path = database or Path(os.environ.get("FB_DATABASE", DEFAULT_DATABASE))
-    repository = ListingRepository(database_path)
+    repository = ListingRepository(database_path, now=now)
     templates = Environment(
         loader=FileSystemLoader(ASSET_ROOT / "templates"),
         autoescape=select_autoescape(["html", "xml"]),
@@ -322,7 +398,7 @@ def create_app(database: Path | None = None) -> FastAPI:
 
     application = FastAPI(
         title="Chineur2000",
-        description="Flux privé d’annonces de logement autour de Lausanne.",
+        description="Flux privé d’annonces de logement à Amsterdam et Lausanne.",
         docs_url=None,
         redoc_url=None,
     )
@@ -336,7 +412,23 @@ def create_app(database: Path | None = None) -> FastAPI:
     )
 
     @application.get("/", response_class=HTMLResponse)
-    def index(
+    def city_picker(request: Request) -> HTMLResponse:
+        counts = repository.city_counts()
+        template = templates.get_template("cities.html")
+        return HTMLResponse(
+            template.render(
+                request=request,
+                cities=[
+                    {"slug": city.slug, "name": city.name, "count": counts[city.slug]}
+                    for city in CITIES.values()
+                ],
+                database_ready=database_path.exists(),
+            )
+        )
+
+    @application.get("/ville/{city_slug}", response_class=HTMLResponse)
+    def city_listings(
+        city_slug: str,
         request: Request,
         area: str = Query(default="", max_length=80),
         max_rent: str = Query(default="", max_length=10),
@@ -345,7 +437,11 @@ def create_app(database: Path | None = None) -> FastAPI:
         particularity: str = Query(default="", max_length=80),
         sort: str = Query(default="newest", max_length=20),
     ) -> HTMLResponse:
+        city = CITIES.get(city_slug.casefold())
+        if city is None:
+            return HTMLResponse("Ville inconnue", status_code=404)
         filters = ListingSearch(
+            city=city.slug,
             area=area.strip(),
             max_rent=_optional_int(max_rent, maximum=10_000),
             min_size=_optional_int(min_size, maximum=1_000),
@@ -360,8 +456,10 @@ def create_app(database: Path | None = None) -> FastAPI:
                 request=request,
                 listings=cards,
                 filters=filters,
-                particularities=repository.particularities(),
-                neighborhoods=[item.value for item in LausanneNeighborhood],
+                city=city,
+                cities=tuple(CITIES.values()),
+                particularities=repository.particularities(city.slug),
+                neighborhoods=city.neighborhoods,
                 active_filter_count=sum(
                     [
                         bool(filters.area),
@@ -372,6 +470,7 @@ def create_app(database: Path | None = None) -> FastAPI:
                     ]
                 ),
                 database_ready=database_path.exists(),
+                max_age_days=LISTING_MAX_AGE_DAYS,
             )
         )
 

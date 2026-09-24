@@ -1,14 +1,22 @@
 [
   {
+    "name": "Kamers Amsterdam · groep 1695927010691648",
+    "url": "https://www.facebook.com/groups/1695927010691648",
+    "city": "amsterdam"
+  },
+  {
     "name": "Logements Lausanne · groupe 851460721563916",
-    "url": "https://www.facebook.com/groups/851460721563916"
+    "url": "https://www.facebook.com/groups/851460721563916",
+    "city": "lausanne"
   },
   {
     "name": "Logements Lausanne · groupe 1604456726464086",
-    "url": "https://www.facebook.com/groups/1604456726464086"
+    "url": "https://www.facebook.com/groups/1604456726464086",
+    "city": "lausanne"
   },
   {
     "name": "Lausanne · Bouche à oreille",
-    "url": "https://www.facebook.com/groups/lausanne.bouche.a.oreille"
+    "url": "https://www.facebook.com/groups/lausanne.bouche.a.oreille",
+    "city": "lausanne"
   }
 ]
