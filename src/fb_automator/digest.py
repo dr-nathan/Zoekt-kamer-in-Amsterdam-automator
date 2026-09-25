@@ -13,6 +13,7 @@ from fb_automator.notifications import (
     NotificationSettings,
     NotificationStore,
     SearchSpec,
+    decode_filter_values,
     send_resend_email,
     send_telegram_message,
     sign_action,
@@ -39,22 +40,26 @@ def _matching_cards(
 ) -> list[ListingCard]:
     matches: dict[str, ListingCard] = {}
     for search in searches:
-        cards = repository.search(
-            ListingSearch(
-                city=search.city,
-                area=search.area,
-                max_rent=search.max_rent,
-                min_size=search.min_size,
-                registration=search.registration,
-                particularity=search.particularity,
-                sort="newest",
-            ),
-            limit=500,
-        )
-        for card in cards:
-            seen = _parse_datetime(card.first_seen_at)
-            if seen is not None and seen >= since:
-                matches[card.key] = card
+        areas = decode_filter_values(search.area) or ("",)
+        particularities = decode_filter_values(search.particularity) or ("",)
+        for area in areas:
+            for particularity in particularities:
+                cards = repository.search(
+                    ListingSearch(
+                        city=search.city,
+                        area=area,
+                        max_rent=search.max_rent,
+                        min_size=search.min_size,
+                        registration=search.registration,
+                        particularity=particularity,
+                        sort="newest",
+                    ),
+                    limit=500,
+                )
+                for card in cards:
+                    seen = _parse_datetime(card.first_seen_at)
+                    if seen is not None and seen >= since:
+                        matches[card.key] = card
     return sorted(
         matches.values(),
         key=lambda item: _parse_datetime(item.first_seen_at) or datetime.min.replace(tzinfo=UTC),

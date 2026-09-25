@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Gérer mes alertes · Chineur2000</title>
-    <link rel="stylesheet" href="/static/site.css?v=20260925-2">
+    <link rel="stylesheet" href="/static/site.css?v=20260925-3">
   </head>
   <body class="utility-page">
     <header class="site-header">
@@ -37,11 +37,11 @@
           {% for search in searches %}
             <article class="saved-search{% if not search.active %} is-paused{% endif %}">
               <div>
-                <strong>{{ search.city|capitalize }}{% if search.area %} · {{ search.area }}{% endif %}</strong>
+                <strong>{{ search.city|capitalize }}{% if search.area %} · {{ search.area|filter_values }}{% endif %}</strong>
                 <span>
                   {% if search.max_rent %}Loyer ≤ {{ search.max_rent }}{% endif %}
                   {% if search.min_size %} · Surface ≥ {{ search.min_size }} m²{% endif %}
-                  {% if search.particularity %} · {{ search.particularity }}{% endif %}
+                  {% if search.particularity %} · {{ search.particularity|filter_values }}{% endif %}
                 </span>
               </div>
               <form method="post" action="/subscriptions/manage/{{ token }}">

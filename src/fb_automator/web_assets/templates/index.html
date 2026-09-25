@@ -123,15 +123,6 @@
                 </div>
                 <div class="digest-filter-grid">
                   <div class="digest-city"><span>Ville</span><strong>{{ city.name }}</strong></div>
-                  <label>
-                    <span>Quartier</span>
-                    <select name="area">
-                      <option value="">Tous les quartiers</option>
-                      {% for neighborhood in neighborhoods %}
-                        <option value="{{ neighborhood }}" {% if filters.area == neighborhood %}selected{% endif %}>{{ neighborhood }}</option>
-                      {% endfor %}
-                    </select>
-                  </label>
                   <label><span>Loyer maximum ({{ city.currency }})</span><input name="max_rent" type="number" min="0" max="10000" step="50" placeholder="1’500" value="{{ filters.max_rent if filters.max_rent is not none else '' }}"></label>
                   <label><span>Surface minimum (m²)</span><input name="min_size" type="number" min="0" max="1000" placeholder="12" value="{{ filters.min_size if filters.min_size is not none else '' }}"></label>
                   <label>
@@ -143,15 +134,24 @@
                       <option value="not_allowed" {% if filters.registration == 'not_allowed' %}selected{% endif %}>Impossible</option>
                     </select>
                   </label>
-                  <label>
-                    <span>Particularité</span>
-                    <select name="particularity">
-                      <option value="">Toutes</option>
-                      {% for option in particularities %}
-                        <option value="{{ option }}" {% if filters.particularity == option %}selected{% endif %}>{{ option }}</option>
+                </div>
+                <div class="digest-choice-groups">
+                  <fieldset class="choice-group">
+                    <legend>Quartiers <small>Plusieurs choix possibles · aucun choix = tous</small></legend>
+                    <div class="choice-grid">
+                      {% for neighborhood in neighborhoods %}
+                        <label><input type="checkbox" name="area" value="{{ neighborhood }}" {% if filters.area == neighborhood %}checked{% endif %}><span>{{ neighborhood }}</span></label>
                       {% endfor %}
-                    </select>
-                  </label>
+                    </div>
+                  </fieldset>
+                  <fieldset class="choice-group">
+                    <legend>Particularités <small>Plusieurs choix possibles · aucun choix = toutes</small></legend>
+                    <div class="choice-grid">
+                      {% for option in particularities %}
+                        <label><input type="checkbox" name="particularity" value="{{ option }}" {% if filters.particularity == option %}checked{% endif %}><span>{{ option }}</span></label>
+                      {% endfor %}
+                    </div>
+                  </fieldset>
                 </div>
 
                 <div class="digest-step digest-contact-step">

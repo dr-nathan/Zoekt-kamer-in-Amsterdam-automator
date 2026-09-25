@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlencode
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -16,6 +17,8 @@ from fb_automator.notifications import (
     SearchSpec,
     _post_json,
     csrf_token,
+    decode_filter_values,
+    encode_filter_values,
     sign_action,
     verify_action,
     verify_csrf,
@@ -65,7 +68,7 @@ class NotificationTests(unittest.TestCase):
                 ?, 'offer', 1200, 'CHF', 'included', NULL, NULL, NULL, 30,
                 'Lausanne 1004', 'Lausanne', 'Centre', '2026-11-01', NULL,
                 'indefinite', 'allowed', 'unfurnished', 'any', NULL, NULL,
-                'none', 'welcome', 'any', NULL, '[]', '[]',
+                'none', 'welcome', 'any', NULL, '[]', '["Temporaire", "Meublé"]',
                 'Studio de 30 m² à Lausanne.', '[]', 'hash-1', 'test', ?
             )
             """,
@@ -113,6 +116,12 @@ class NotificationTests(unittest.TestCase):
         csrf = csrf_token(self.settings.app_secret, "subscribe")
         self.assertTrue(verify_csrf(self.settings.app_secret, "subscribe", csrf))
 
+    def test_multi_value_filters_round_trip(self) -> None:
+        encoded = encode_filter_values(("Centre", "Montchoisi", "Centre"))
+        self.assertEqual(decode_filter_values(encoded), ("Centre", "Montchoisi"))
+        self.assertEqual(decode_filter_values("Centre"), ("Centre",))
+        self.assertEqual(decode_filter_values(""), ())
+
     def test_telegram_verification_requires_start_token(self) -> None:
         with NotificationStore(self.database) as store:
             channel, token = store.create_telegram_subscription(
@@ -147,7 +156,16 @@ class NotificationTests(unittest.TestCase):
     def test_daily_digest_is_personalized_and_idempotent(self) -> None:
         with NotificationStore(self.database) as store:
             channel, token = store.create_email_subscription(
-                "alex@example.com", SearchSpec(city="lausanne", max_rent=1500), "Alex"
+                "alex@example.com",
+                SearchSpec(
+                    city="lausanne",
+                    area=encode_filter_values(("Montchoisi", "Centre")),
+                    max_rent=1500,
+                    particularity=encode_filter_values(
+                        ("Femmes uniquement", "Temporaire")
+                    ),
+                ),
+                "Alex",
             )
             store.verify_email(str(token))
             store.connection.execute(
@@ -209,24 +227,29 @@ class NotificationTests(unittest.TestCase):
                 )
                 self.assertIn("Créer une alerte sur mesure", page.text)
                 self.assertIn('class="digest-filter-grid"', page.text)
-                self.assertIn('option value="Centre" selected', page.text)
+                self.assertIn('name="area" value="Centre" checked', page.text)
                 self.assertIn('name="max_rent" type="number"', page.text)
                 self.assertIn('value="1500"', page.text)
                 self.assertIn('formaction="/subscriptions/email"', page.text)
                 self.assertIn('formaction="/subscriptions/telegram"', page.text)
                 response = client.post(
                     "/subscriptions/email",
-                    data={
-                        "csrf": csrf_token(self.settings.app_secret, "subscribe"),
-                        "city": "lausanne",
-                        "area": "Centre",
-                        "max_rent": "1500",
-                        "min_size": "",
-                        "registration": "any",
-                        "particularity": "",
-                        "display_name": "Alex",
-                        "email": "alex@example.com",
-                    },
+                    content=urlencode(
+                        [
+                            ("csrf", csrf_token(self.settings.app_secret, "subscribe")),
+                            ("city", "lausanne"),
+                            ("area", "Centre"),
+                            ("area", "Montchoisi"),
+                            ("max_rent", "1500"),
+                            ("min_size", ""),
+                            ("registration", "any"),
+                            ("particularity", "Temporaire"),
+                            ("particularity", "Meublé"),
+                            ("display_name", "Alex"),
+                            ("email", "alex@example.com"),
+                        ]
+                    ),
+                    headers={"content-type": "application/x-www-form-urlencoded"},
                 )
                 self.assertEqual(response.status_code, 200)
                 self.assertIn("Vérifiez votre boîte mail", response.text)
@@ -237,6 +260,15 @@ class NotificationTests(unittest.TestCase):
 
                 with NotificationStore(self.database) as store:
                     channel = store.channel_by_destination("email", "alex@example.com")
+                    saved_search = store.list_searches(channel.subscriber_id)[0]
+                    self.assertEqual(
+                        decode_filter_values(saved_search["area"]),
+                        ("Centre", "Montchoisi"),
+                    )
+                    self.assertEqual(
+                        decode_filter_values(saved_search["particularity"]),
+                        ("Temporaire", "Meublé"),
+                    )
                 manage_token = sign_action(self.settings.app_secret, "manage", channel.id)
                 unsubscribe_token = sign_action(
                     self.settings.app_secret, "unsubscribe", channel.id

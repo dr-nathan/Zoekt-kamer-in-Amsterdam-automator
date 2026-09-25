@@ -130,6 +130,34 @@ def destination_fingerprint(channel_type: str, destination: str) -> str:
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
+def encode_filter_values(values: list[str] | tuple[str, ...]) -> str:
+    normalized = tuple(dict.fromkeys(value.strip() for value in values if value.strip()))
+    if not normalized:
+        return ""
+    if len(normalized) == 1:
+        return normalized[0]
+    return json.dumps(normalized, ensure_ascii=False, separators=(",", ":"))
+
+
+def decode_filter_values(value: str | None) -> tuple[str, ...]:
+    if not value:
+        return ()
+    if value.startswith("["):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return (value,)
+        if isinstance(parsed, list):
+            return tuple(
+                dict.fromkeys(
+                    str(item).strip()
+                    for item in parsed
+                    if isinstance(item, str) and item.strip()
+                )
+            )
+    return (value,)
+
+
 def sign_action(secret: str, purpose: str, channel_id: int) -> str:
     if not secret:
         raise RuntimeError("APP_SECRET is not configured.")

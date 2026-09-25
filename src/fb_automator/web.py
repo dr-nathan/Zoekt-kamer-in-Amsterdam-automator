@@ -28,6 +28,8 @@ from fb_automator.notifications import (
     NotificationStore,
     SearchSpec,
     csrf_token,
+    decode_filter_values,
+    encode_filter_values,
     send_resend_email,
     send_telegram_message,
     sign_action,
@@ -37,7 +39,7 @@ from fb_automator.notifications import (
 
 DEFAULT_DATABASE = Path("data/listings.db")
 ASSET_ROOT = Path(__file__).parent / "web_assets"
-ASSET_VERSION = "20260925-2"
+ASSET_VERSION = "20260925-3"
 LISTING_MAX_AGE_DAYS = 14
 
 
@@ -418,6 +420,9 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
         loader=FileSystemLoader(ASSET_ROOT / "templates"),
         autoescape=select_autoescape(["html", "xml"]),
     )
+    templates.filters["filter_values"] = lambda value: ", ".join(
+        decode_filter_values(value)
+    )
 
     application = FastAPI(
         title="Chineur2000",
@@ -511,7 +516,8 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
 
     @application.post("/subscriptions/email", response_class=HTMLResponse)
     async def subscribe_email(request: Request) -> HTMLResponse:
-        data = await _form_values(request)
+        form_values = await _form_multi_values(request)
+        data = _last_form_values(form_values)
         if not notification_settings.email_enabled:
             return _message_response(
                 templates,
@@ -526,7 +532,7 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
                 templates, "Lien expiré", "Rechargez la page et réessayez.", status_code=403
             )
         try:
-            search = _search_spec_from_values(data)
+            search = _search_spec_from_multi_values(form_values)
             with NotificationStore(database_path) as store:
                 channel, verification_token = store.create_email_subscription(
                     data.get("email", ""), search, data.get("display_name", "")
@@ -574,7 +580,8 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
 
     @application.post("/subscriptions/telegram")
     async def subscribe_telegram(request: Request) -> HTMLResponse:
-        data = await _form_values(request)
+        form_values = await _form_multi_values(request)
+        data = _last_form_values(form_values)
         if not notification_settings.telegram_enabled:
             return _message_response(
                 templates,
@@ -589,7 +596,7 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
                 templates, "Lien expiré", "Rechargez la page et réessayez.", status_code=403
             )
         try:
-            search = _search_spec_from_values(data)
+            search = _search_spec_from_multi_values(form_values)
             with NotificationStore(database_path) as store:
                 _, verification_token = store.create_telegram_subscription(
                     search, data.get("display_name", "")
@@ -1018,16 +1025,50 @@ def _optional_int(value: str, *, maximum: int) -> int | None:
 
 
 async def _form_values(request: Request) -> dict[str, str]:
+    return _last_form_values(await _form_multi_values(request))
+
+
+async def _form_multi_values(request: Request) -> dict[str, list[str]]:
     content_type = request.headers.get("content-type", "")
     if "application/x-www-form-urlencoded" not in content_type:
         return {}
     body = (await request.body()).decode("utf-8", errors="replace")
-    return {
-        key: values[-1]
-        for key, values in urllib.parse.parse_qs(
-            body, keep_blank_values=True, max_num_fields=30
-        ).items()
-    }
+    return urllib.parse.parse_qs(body, keep_blank_values=True, max_num_fields=100)
+
+
+def _last_form_values(values: dict[str, list[str]]) -> dict[str, str]:
+    return {key: items[-1] for key, items in values.items() if items}
+
+
+def _search_spec_from_multi_values(values: dict[str, list[str]]) -> SearchSpec:
+    flattened = _last_form_values(values)
+    city_slug = flattened.get("city", "").strip().casefold()
+    city = CITIES.get(city_slug)
+    if city is None:
+        raise ValueError("Ville invalide.")
+    areas = tuple(
+        dict.fromkeys(value.strip() for value in values.get("area", []) if value.strip())
+    )
+    if any(area not in city.neighborhoods for area in areas):
+        raise ValueError("Quartier invalide.")
+    registration = flattened.get("registration", "any").strip()
+    if registration not in {"any", "allowed", "required", "not_allowed"}:
+        raise ValueError("Filtre de domiciliation invalide.")
+    particularities = tuple(
+        dict.fromkeys(
+            value.strip()[:80]
+            for value in values.get("particularity", [])
+            if value.strip()
+        )
+    )
+    return SearchSpec(
+        city=city_slug,
+        area=encode_filter_values(areas),
+        max_rent=_optional_int(flattened.get("max_rent", ""), maximum=10_000),
+        min_size=_optional_int(flattened.get("min_size", ""), maximum=1_000),
+        registration=registration,
+        particularity=encode_filter_values(particularities),
+    )
 
 
 def _search_spec_from_values(values: dict[str, str]) -> SearchSpec:
