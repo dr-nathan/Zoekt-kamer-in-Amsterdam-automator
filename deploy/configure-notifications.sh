@@ -60,13 +60,16 @@ if path.exists():
 
 updates = {
     "PUBLIC_BASE_URL": "https://facebookrooms.nl",
-    "APP_SECRET": os.environ["app_secret"],
+    "APP_SECRET": existing.get("APP_SECRET") or os.environ["app_secret"],
     "RESEND_API_KEY": os.environ["resend_api_key"],
     "RESEND_FROM": os.environ["resend_from"],
     "RESEND_WEBHOOK_SECRET": os.environ["resend_webhook_secret"],
     "TELEGRAM_BOT_TOKEN": os.environ["telegram_bot_token"],
     "TELEGRAM_BOT_USERNAME": os.environ["telegram_bot_username"],
-    "TELEGRAM_WEBHOOK_SECRET": os.environ["telegram_webhook_secret"],
+    "TELEGRAM_WEBHOOK_SECRET": (
+        existing.get("TELEGRAM_WEBHOOK_SECRET")
+        or os.environ["telegram_webhook_secret"]
+    ),
 }
 for key, value in updates.items():
     if value or key in {"PUBLIC_BASE_URL", "APP_SECRET", "TELEGRAM_WEBHOOK_SECRET"}:
@@ -77,6 +80,7 @@ path.chmod(0o600)
 PY
 
 unset app_secret resend_api_key resend_from resend_webhook_secret
+telegram_webhook_secret=$(sed -n 's/^TELEGRAM_WEBHOOK_SECRET=//p' "$ENV_FILE")
 
 site_hash=$(sed -n '1p' "$SITE_HASH_FILE")
 admin_hash=$(sed -n '1p' "$ADMIN_HASH_FILE")

@@ -158,7 +158,8 @@ bash deploy/configure-notifications.sh
 The script asks for a separate administrator password, optional Resend credentials, and optional
 Telegram BotFather credentials. It generates the application and Telegram webhook secrets, updates
 the private `.env`, installs the 09:00 timer, configures the Telegram webhook when possible, and
-reloads Caddy. For e-mail, verify `facebookrooms.nl` (or a sending subdomain) in Resend and register
+reloads Caddy. It can safely be rerun to add a provider later without rotating existing application
+or webhook secrets. For e-mail, verify `facebookrooms.nl` (or a sending subdomain) in Resend and register
 `https://facebookrooms.nl/webhooks/resend` as the webhook endpoint.
 
 Subscription verification, management, unsubscribe, and provider webhook routes bypass the shared
