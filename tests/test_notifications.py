@@ -14,6 +14,7 @@ from fb_automator.notifications import (
     NotificationSettings,
     NotificationStore,
     SearchSpec,
+    _post_json,
     csrf_token,
     sign_action,
     verify_action,
@@ -260,6 +261,20 @@ class NotificationTests(unittest.TestCase):
         with TestClient(application) as client:
             health = client.get("/health").json()
         self.assertEqual(health["database"], str(requested_database.resolve()))
+
+    def test_provider_requests_identify_the_application(self) -> None:
+        with patch("urllib.request.urlopen") as urlopen:
+            response = urlopen.return_value.__enter__.return_value
+            response.read.return_value = b'{"ok": true}'
+
+            result = _post_json("https://provider.example/test", {}, {"test": True})
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(
+            request.get_header("User-agent"),
+            "Chineur2000/1.0 (+https://facebookrooms.nl)",
+        )
+        self.assertEqual(result, {"ok": True})
 
 
 if __name__ == "__main__":

@@ -842,7 +842,11 @@ def _post_json(url: str, headers: dict[str, str], payload: dict[str, Any]) -> di
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", **headers},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "Chineur2000/1.0 (+https://facebookrooms.nl)",
+            **headers,
+        },
         method="POST",
     )
     try:
