@@ -22,6 +22,14 @@ if [[ ${#admin_password} -lt 14 ]]; then
     echo "Use at least 14 characters for the admin password." >&2
     exit 1
 fi
+read -r -s -p "Repeat the new /admin password: " admin_password_confirmation
+printf '\n'
+if [[ "$admin_password" != "$admin_password_confirmation" ]]; then
+    unset admin_password admin_password_confirmation
+    echo "The passwords did not match; nothing was changed." >&2
+    exit 1
+fi
+unset admin_password_confirmation
 admin_hash=$(caddy hash-password --plaintext "$admin_password")
 unset admin_password
 umask 077
