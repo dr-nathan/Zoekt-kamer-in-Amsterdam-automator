@@ -100,7 +100,7 @@ class ListingRepositoryTests(unittest.TestCase):
         )
         self.assertEqual(results, [])
 
-    def test_exact_cross_posts_are_shown_once(self) -> None:
+    def test_exact_and_near_duplicate_cross_posts_are_shown_once(self) -> None:
         connection = sqlite3.connect(self.database)
         connection.execute(
             """
@@ -143,6 +143,26 @@ class ListingRepositoryTests(unittest.TestCase):
         connection.commit()
         connection.close()
 
+        results = ListingRepository(self.database, now=self.now).search(ListingSearch())
+        self.assertEqual(len(results), 1)
+
+        connection = sqlite3.connect(self.database)
+        try:
+            connection.execute(
+                """
+                UPDATE listings
+                SET source_hash = ?, summary = ?
+                WHERE raw_post_key = ?
+                """,
+                (
+                    "different-hash",
+                    "Chambre lumineuse à Sous-Gare!",
+                    "duplicate",
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
         results = ListingRepository(self.database, now=self.now).search(ListingSearch())
         self.assertEqual(len(results), 1)
 
@@ -208,6 +228,52 @@ class ListingRepositoryTests(unittest.TestCase):
         finally:
             connection.close()
         self.assertEqual(repository.search(ListingSearch(city="lausanne")), [])
+
+    def test_actual_facebook_date_also_enforces_two_week_cutoff(self) -> None:
+        connection = sqlite3.connect(self.database)
+        try:
+            connection.execute(
+                """
+                UPDATE raw_posts
+                SET first_seen_at = ?, published_label = ?
+                WHERE dedupe_key = ?
+                """,
+                (
+                    "2026-09-24T10:00:00+00:00",
+                    "Wednesday, September 9, 2026 at 9:35 PM",
+                    "abc123",
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        results = ListingRepository(self.database, now=self.now).search(
+            ListingSearch(city="lausanne")
+        )
+        self.assertEqual(results, [])
+
+    def test_property_area_and_summary_currency_are_displayed_consistently(self) -> None:
+        connection = sqlite3.connect(self.database)
+        try:
+            connection.execute(
+                """
+                UPDATE listings
+                SET room_size_m2 = NULL, property_size_m2 = 45,
+                    currency = 'EUR', summary = 'Appartement à 1 400 CHF.'
+                WHERE raw_post_key = ?
+                """,
+                ("abc123",),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        results = ListingRepository(self.database, now=self.now).search(
+            ListingSearch(city="lausanne", min_size=40)
+        )
+        self.assertEqual(results[0].size_label, "Logement de 45 m²")
+        self.assertEqual(results[0].rent_label, "CHF 850 / mois")
 
     def test_empty_number_fields_are_treated_as_unset(self) -> None:
         self.assertIsNone(_optional_int("", maximum=10_000))

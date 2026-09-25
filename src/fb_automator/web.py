@@ -3,10 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -77,6 +79,7 @@ class ListingCard:
     monthly_rent: float | None
     currency: str
     room_size_m2: float | None
+    property_size_m2: float | None
     available_from: str | None
     available_to: str | None
     utilities: str
@@ -107,9 +110,11 @@ class ListingCard:
 
     @property
     def size_label(self) -> str:
-        if self.room_size_m2 is None:
-            return "Surface non précisée"
-        return f"Chambre de {self.room_size_m2:g} m²"
+        if self.room_size_m2 is not None:
+            return f"Chambre de {self.room_size_m2:g} m²"
+        if self.property_size_m2 is not None:
+            return f"Logement de {self.property_size_m2:g} m²"
+        return "Surface non précisée"
 
     @property
     def availability_label(self) -> str:
@@ -161,7 +166,7 @@ class ListingRepository:
             else (lambda: datetime.now(timezone.utc))
         )
 
-    def search(self, filters: ListingSearch, limit: int = 60) -> list[ListingCard]:
+    def search(self, filters: ListingSearch, limit: int = 200) -> list[ListingCard]:
         if not self.database.exists():
             return []
 
@@ -182,7 +187,10 @@ class ListingRepository:
             clauses.append("l.monthly_rent IS NOT NULL AND l.monthly_rent <= ?")
             params.append(filters.max_rent)
         if filters.min_size is not None:
-            clauses.append("l.room_size_m2 IS NOT NULL AND l.room_size_m2 >= ?")
+            clauses.append(
+                "COALESCE(l.room_size_m2, l.property_size_m2) IS NOT NULL "
+                "AND COALESCE(l.room_size_m2, l.property_size_m2) >= ?"
+            )
             params.append(filters.min_size)
         if filters.registration in {"allowed", "not_allowed", "required"}:
             clauses.append("l.registration = ?")
@@ -228,7 +236,7 @@ class ListingRepository:
 
         query = f"""
             SELECT l.raw_post_key, l.source_hash, l.monthly_rent, l.currency,
-                   l.utilities, l.room_size_m2,
+                   l.utilities, l.room_size_m2, l.property_size_m2,
                    l.location_text, l.city, l.neighborhood, l.available_from,
                    l.available_to, l.lease_type, l.registration, l.furnishing,
                    l.amenities_json, l.particularities_json, l.summary,
@@ -255,26 +263,35 @@ class ListingRepository:
         ordered_hashes: list[str] = []
         best_rows: dict[str, sqlite3.Row] = {}
         for row in rows:
+            if not _facebook_post_is_recent(
+                row["published_label"], self._now(), LISTING_MAX_AGE_DAYS
+            ):
+                continue
             source_hash = row["source_hash"] or row["raw_post_key"]
             current = best_rows.get(source_hash)
             if current is None:
                 ordered_hashes.append(source_hash)
                 best_rows[source_hash] = row
                 continue
-            candidate_score = (
-                row["image_quality_score"] or 0,
-                len(_json_image_paths(row["image_paths_json"])),
-                (row["reaction_count"] or 0) + 2 * (row["comment_count"] or 0),
-            )
-            current_score = (
-                current["image_quality_score"] or 0,
-                len(_json_image_paths(current["image_paths_json"])),
-                (current["reaction_count"] or 0)
-                + 2 * (current["comment_count"] or 0),
-            )
-            if candidate_score > current_score:
+            if _row_quality(row) > _row_quality(current):
                 best_rows[source_hash] = row
-        return [self._to_card(best_rows[key]) for key in ordered_hashes[:limit]]
+
+        deduplicated: list[sqlite3.Row] = []
+        for source_hash in ordered_hashes:
+            row = best_rows[source_hash]
+            duplicate_index = next(
+                (
+                    index
+                    for index, existing in enumerate(deduplicated)
+                    if _rows_are_near_duplicates(row, existing)
+                ),
+                None,
+            )
+            if duplicate_index is None:
+                deduplicated.append(row)
+            elif _row_quality(row) > _row_quality(deduplicated[duplicate_index]):
+                deduplicated[duplicate_index] = row
+        return [self._to_card(row) for row in deduplicated[:limit]]
 
     def _to_card(self, row: sqlite3.Row) -> ListingCard:
         city = CITIES.get(row["source_city"], CITIES["lausanne"])
@@ -308,8 +325,9 @@ class ListingRepository:
             location=location,
             neighborhood=row["neighborhood"],
             monthly_rent=row["monthly_rent"],
-            currency=row["currency"] or city.currency,
+            currency=_display_currency(row["currency"], row["summary"], city),
             room_size_m2=row["room_size_m2"],
+            property_size_m2=row["property_size_m2"],
             available_from=row["available_from"],
             available_to=row["available_to"],
             utilities=row["utilities"],
@@ -371,31 +389,10 @@ class ListingRepository:
         return sorted(labels, key=str.casefold)
 
     def city_counts(self) -> dict[str, int]:
-        counts = {slug: 0 for slug in CITIES}
-        if not self.database.exists():
-            return counts
-        cutoff = (self._now() - timedelta(days=LISTING_MAX_AGE_DAYS)).isoformat()
-        try:
-            with closing(sqlite3.connect(
-                f"file:{self.database.resolve()}?mode=ro", uri=True
-            )) as connection:
-                rows = connection.execute(
-                    """
-                    SELECT r.source_city,
-                           COUNT(DISTINCT COALESCE(NULLIF(l.source_hash, ''), l.raw_post_key))
-                    FROM listings AS l
-                    JOIN raw_posts AS r ON r.dedupe_key = l.raw_post_key
-                    WHERE l.listing_kind = 'offer' AND r.first_seen_at >= ?
-                    GROUP BY r.source_city
-                    """,
-                    (cutoff,),
-                ).fetchall()
-            for city_slug, count in rows:
-                if city_slug in counts:
-                    counts[str(city_slug)] = int(count)
-        except sqlite3.Error:
-            pass
-        return counts
+        return {
+            slug: len(self.search(ListingSearch(city=slug), limit=1_000))
+            for slug in CITIES
+        }
 
 
 def create_app(database: Path | None = None, now: datetime | None = None) -> FastAPI:
@@ -531,6 +528,63 @@ def _safe_url(value: str | None) -> str | None:
     if parsed.scheme in {"http", "https"} and parsed.netloc:
         return value
     return None
+
+
+def _display_currency(
+    stored_currency: str | None, summary: str, source_city: CityConfig
+) -> str:
+    mentions_chf = bool(re.search(r"\bCHF\b", summary, flags=re.IGNORECASE))
+    mentions_eur = "€" in summary or bool(
+        re.search(r"\bEUR\b", summary, flags=re.IGNORECASE)
+    )
+    if mentions_chf != mentions_eur:
+        return "CHF" if mentions_chf else "EUR"
+    if stored_currency in {"CHF", "EUR"}:
+        return stored_currency
+    return source_city.currency
+
+
+def _row_quality(row: sqlite3.Row) -> tuple[int, int, int]:
+    return (
+        row["image_quality_score"] or 0,
+        len(_json_image_paths(row["image_paths_json"])),
+        (row["reaction_count"] or 0) + 2 * (row["comment_count"] or 0),
+    )
+
+
+def _rows_are_near_duplicates(left: sqlite3.Row, right: sqlite3.Row) -> bool:
+    if left["source_city"] != right["source_city"]:
+        return False
+    left_rent = left["monthly_rent"]
+    right_rent = right["monthly_rent"]
+    if (left_rent is None) != (right_rent is None):
+        return False
+    if left_rent is not None and abs(left_rent - right_rent) > 1:
+        return False
+    left_location = _clean_location(left["location_text"])
+    right_location = _clean_location(right["location_text"])
+    if not left_location or not right_location:
+        return False
+    if left_location.casefold() != right_location.casefold():
+        return False
+    left_summary = " ".join(str(left["summary"]).casefold().split())
+    right_summary = " ".join(str(right["summary"]).casefold().split())
+    return SequenceMatcher(None, left_summary, right_summary).ratio() >= 0.84
+
+
+def _facebook_post_is_recent(
+    published_label: str | None, now: datetime, max_age_days: int
+) -> bool:
+    if not published_label:
+        return True
+    normalized = published_label.replace("\u202f", " ").replace("\xa0", " ")
+    try:
+        published = datetime.strptime(
+            normalized, "%A, %B %d, %Y at %I:%M %p"
+        ).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return True
+    return published >= now - timedelta(days=max_age_days)
 
 
 def _display_location(row: sqlite3.Row, source_city: CityConfig) -> str:
