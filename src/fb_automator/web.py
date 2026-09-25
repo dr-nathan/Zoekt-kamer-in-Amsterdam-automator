@@ -37,7 +37,7 @@ from fb_automator.notifications import (
 
 DEFAULT_DATABASE = Path("data/listings.db")
 ASSET_ROOT = Path(__file__).parent / "web_assets"
-ASSET_VERSION = "20260925-1"
+ASSET_VERSION = "20260925-2"
 LISTING_MAX_AGE_DAYS = 14
 
 

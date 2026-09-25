@@ -189,6 +189,9 @@ class NotificationTests(unittest.TestCase):
             "PUBLIC_BASE_URL": self.settings.base_url,
             "RESEND_API_KEY": self.settings.resend_api_key,
             "RESEND_FROM": self.settings.resend_from,
+            "TELEGRAM_BOT_TOKEN": self.settings.telegram_bot_token,
+            "TELEGRAM_BOT_USERNAME": self.settings.telegram_bot_username,
+            "TELEGRAM_WEBHOOK_SECRET": self.settings.telegram_webhook_secret,
         }
         sent: list[dict[str, object]] = []
 
@@ -200,8 +203,17 @@ class NotificationTests(unittest.TestCase):
             "fb_automator.web.send_resend_email", side_effect=fake_send
         ):
             with TestClient(create_app(self.database)) as client:
-                page = client.get("/ville/lausanne")
-                self.assertIn("Recevoir ces annonces chaque matin", page.text)
+                page = client.get(
+                    "/ville/lausanne?area=Centre&max_rent=1500&min_size=20"
+                    "&registration=allowed"
+                )
+                self.assertIn("Créer une alerte sur mesure", page.text)
+                self.assertIn('class="digest-filter-grid"', page.text)
+                self.assertIn('option value="Centre" selected', page.text)
+                self.assertIn('name="max_rent" type="number"', page.text)
+                self.assertIn('value="1500"', page.text)
+                self.assertIn('formaction="/subscriptions/email"', page.text)
+                self.assertIn('formaction="/subscriptions/telegram"', page.text)
                 response = client.post(
                     "/subscriptions/email",
                     data={

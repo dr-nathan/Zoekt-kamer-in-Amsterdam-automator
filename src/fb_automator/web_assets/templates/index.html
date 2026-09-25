@@ -109,38 +109,71 @@
         {% if notifications_available %}
           <details class="digest-panel">
             <summary>
-              <span><strong>Recevoir ces annonces chaque matin</strong><small>Un seul récapitulatif à 09:00, uniquement s’il y a du nouveau.</small></span>
+              <span><strong>Créer une alerte sur mesure</strong><small>Choisissez vos critères, puis recevez les nouvelles annonces à 09:00.</small></span>
               <span aria-hidden="true">＋</span>
             </summary>
             <div class="digest-content">
-              {% if email_notifications_available %}
-                <form class="digest-form" method="post" action="/subscriptions/email">
-                  <input type="hidden" name="csrf" value="{{ subscription_csrf }}">
-                  <input type="hidden" name="city" value="{{ city.slug }}">
-                  <input type="hidden" name="area" value="{{ filters.area }}">
-                  <input type="hidden" name="max_rent" value="{{ filters.max_rent if filters.max_rent is not none else '' }}">
-                  <input type="hidden" name="min_size" value="{{ filters.min_size if filters.min_size is not none else '' }}">
-                  <input type="hidden" name="registration" value="{{ filters.registration }}">
-                  <input type="hidden" name="particularity" value="{{ filters.particularity }}">
+              <form class="digest-form" method="post">
+                <input type="hidden" name="csrf" value="{{ subscription_csrf }}">
+                <input type="hidden" name="city" value="{{ city.slug }}">
+
+                <div class="digest-step">
+                  <span>01</span>
+                  <div><strong>Vos critères</strong><small>Ils sont préremplis avec la recherche affichée, mais restent indépendants de la page.</small></div>
+                </div>
+                <div class="digest-filter-grid">
+                  <div class="digest-city"><span>Ville</span><strong>{{ city.name }}</strong></div>
+                  <label>
+                    <span>Quartier</span>
+                    <select name="area">
+                      <option value="">Tous les quartiers</option>
+                      {% for neighborhood in neighborhoods %}
+                        <option value="{{ neighborhood }}" {% if filters.area == neighborhood %}selected{% endif %}>{{ neighborhood }}</option>
+                      {% endfor %}
+                    </select>
+                  </label>
+                  <label><span>Loyer maximum ({{ city.currency }})</span><input name="max_rent" type="number" min="0" max="10000" step="50" placeholder="1’500" value="{{ filters.max_rent if filters.max_rent is not none else '' }}"></label>
+                  <label><span>Surface minimum (m²)</span><input name="min_size" type="number" min="0" max="1000" placeholder="12" value="{{ filters.min_size if filters.min_size is not none else '' }}"></label>
+                  <label>
+                    <span>Domiciliation</span>
+                    <select name="registration">
+                      <option value="any" {% if filters.registration == 'any' %}selected{% endif %}>Indifférent</option>
+                      <option value="allowed" {% if filters.registration == 'allowed' %}selected{% endif %}>Possible</option>
+                      <option value="required" {% if filters.registration == 'required' %}selected{% endif %}>Obligatoire</option>
+                      <option value="not_allowed" {% if filters.registration == 'not_allowed' %}selected{% endif %}>Impossible</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Particularité</span>
+                    <select name="particularity">
+                      <option value="">Toutes</option>
+                      {% for option in particularities %}
+                        <option value="{{ option }}" {% if filters.particularity == option %}selected{% endif %}>{{ option }}</option>
+                      {% endfor %}
+                    </select>
+                  </label>
+                </div>
+
+                <div class="digest-step digest-contact-step">
+                  <span>02</span>
+                  <div><strong>Où envoyer les trouvailles&nbsp;?</strong><small>Un seul récapitulatif par jour, uniquement quand de nouvelles annonces correspondent.</small></div>
+                </div>
+                <div class="digest-contact-grid">
                   <label><span>Prénom facultatif</span><input name="display_name" maxlength="120" autocomplete="name" placeholder="Alex"></label>
-                  <label><span>Adresse e-mail</span><input name="email" type="email" required autocomplete="email" placeholder="alex@example.com"></label>
-                  <button class="primary-button compact-button" type="submit">Activer par e-mail</button>
-                </form>
-              {% endif %}
-              {% if telegram_notifications_available %}
-                <form class="digest-form telegram-form" method="post" action="/subscriptions/telegram">
-                  <input type="hidden" name="csrf" value="{{ subscription_csrf }}">
-                  <input type="hidden" name="city" value="{{ city.slug }}">
-                  <input type="hidden" name="area" value="{{ filters.area }}">
-                  <input type="hidden" name="max_rent" value="{{ filters.max_rent if filters.max_rent is not none else '' }}">
-                  <input type="hidden" name="min_size" value="{{ filters.min_size if filters.min_size is not none else '' }}">
-                  <input type="hidden" name="registration" value="{{ filters.registration }}">
-                  <input type="hidden" name="particularity" value="{{ filters.particularity }}">
-                  <label><span>Prénom facultatif</span><input name="display_name" maxlength="120" autocomplete="name" placeholder="Alex"></label>
-                  <p>Telegram s’ouvrira sur <strong>@{{ telegram_bot_username }}</strong>. Appuyez ensuite sur Start pour relier votre conversation.</p>
-                  <button class="secondary-button compact-button" type="submit">Connecter Telegram</button>
-                </form>
-              {% endif %}
+                  {% if email_notifications_available %}
+                    <label><span>Adresse e-mail</span><input name="email" type="email" required autocomplete="email" placeholder="alex@example.com"></label>
+                  {% endif %}
+                  <div class="digest-actions">
+                    {% if email_notifications_available %}
+                      <button class="primary-button compact-button" type="submit" formaction="/subscriptions/email">Activer par e-mail</button>
+                    {% endif %}
+                    {% if telegram_notifications_available %}
+                      <button class="secondary-button compact-button" type="submit" formaction="/subscriptions/telegram" formnovalidate>Connecter Telegram</button>
+                      <small>via @{{ telegram_bot_username }}</small>
+                    {% endif %}
+                  </div>
+                </div>
+              </form>
             </div>
           </details>
         {% endif %}
