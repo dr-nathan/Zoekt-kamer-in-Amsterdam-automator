@@ -5,7 +5,6 @@ from pathlib import Path
 
 from fb_automator.collector import FacebookCollector
 from fb_automator.config import load_groups
-from fb_automator.digest import send_daily_digests
 from fb_automator.extractor import extract_database
 from fb_automator.image_reviewer import review_database_images
 from fb_automator.notifications import tracked_job
@@ -94,15 +93,15 @@ def main() -> None:
     if args.command == "serve":
         if not 1 <= args.port <= 65535:
             raise SystemExit("error: --port must be between 1 and 65535")
-        import os
-
         import uvicorn
+        from fb_automator.web import create_app
 
-        os.environ["FB_DATABASE"] = str(args.database.resolve())
-        uvicorn.run("fb_automator.web:app", host=args.host, port=args.port)
+        uvicorn.run(create_app(args.database.resolve()), host=args.host, port=args.port)
         return
 
     if args.command == "digest":
+        from fb_automator.digest import send_daily_digests
+
         try:
             with tracked_job(args.database, "digest") as details:
                 result = send_daily_digests(args.database)

@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from fb_automator.cli import main as cli_main
 from fb_automator.digest import send_daily_digests
 from fb_automator.notifications import (
     NotificationSettings,
@@ -238,6 +239,27 @@ class NotificationTests(unittest.TestCase):
                 admin = client.get("/admin", headers={"x-chineur-admin": "1"})
                 self.assertEqual(admin.status_code, 200)
                 self.assertIn("Tableau de bord", admin.text)
+
+    def test_serve_command_uses_requested_database(self) -> None:
+        requested_database = Path(self.temporary.name) / "production.db"
+        with patch(
+            "sys.argv",
+            [
+                "fb-housing",
+                "serve",
+                "--database",
+                str(requested_database),
+                "--port",
+                "8123",
+            ],
+        ), patch("uvicorn.run") as run:
+            cli_main()
+
+        application = run.call_args.args[0]
+        self.assertEqual(run.call_args.kwargs["port"], 8123)
+        with TestClient(application) as client:
+            health = client.get("/health").json()
+        self.assertEqual(health["database"], str(requested_database.resolve()))
 
 
 if __name__ == "__main__":
