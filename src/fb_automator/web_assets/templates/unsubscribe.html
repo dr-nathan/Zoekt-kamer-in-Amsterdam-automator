@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Se désabonner · Chineur2000</title>
+    <link rel="stylesheet" href="/static/site.css?v=20260925-1">
+  </head>
+  <body class="utility-page">
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Accueil Chineur2000">
+        <span class="brand-mark" aria-hidden="true">C</span>
+        <span>Chineur<span>2000</span></span>
+      </a>
+    </header>
+    <main class="utility-shell shell">
+      <section class="utility-card">
+        {% if unsubscribed %}
+          <p class="eyebrow">Terminé</p>
+          <h1>Alertes arrêtées</h1>
+          <p>{{ channel.masked_destination }} ne recevra plus de récapitulatif Chineur2000.</p>
+          <a class="secondary-button" href="/">Retour aux annonces</a>
+        {% else %}
+          <p class="eyebrow">{{ channel.masked_destination }}</p>
+          <h1>Arrêter ces alertes&nbsp;?</h1>
+          <p>Cette action désactive tous les filtres envoyés vers cette destination. Vous pourrez vous réabonner plus tard.</p>
+          <form method="post" action="/unsubscribe/{{ token }}">
+            <button class="primary-button compact-button" type="submit">Confirmer le désabonnement</button>
+          </form>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>

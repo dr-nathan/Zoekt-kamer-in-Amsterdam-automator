@@ -98,6 +98,126 @@ CREATE INDEX IF NOT EXISTS idx_listings_kind_rent
     ON listings (listing_kind, monthly_rent);
 CREATE INDEX IF NOT EXISTS idx_listings_location
     ON listings (location_text);
+
+CREATE TABLE IF NOT EXISTS subscribers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    public_id TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS notification_channels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subscriber_id INTEGER NOT NULL,
+    channel_type TEXT NOT NULL CHECK(channel_type IN ('email', 'telegram')),
+    destination TEXT,
+    destination_fingerprint TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    verification_token_hash TEXT,
+    verified_at TEXT,
+    unsubscribed_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (subscriber_id) REFERENCES subscribers(id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_channels_destination
+    ON notification_channels (channel_type, destination_fingerprint)
+    WHERE destination_fingerprint IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_notification_channels_status
+    ON notification_channels (status, channel_type);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_channels_verification
+    ON notification_channels (verification_token_hash)
+    WHERE verification_token_hash IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS saved_searches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subscriber_id INTEGER NOT NULL,
+    city TEXT NOT NULL,
+    area TEXT NOT NULL DEFAULT '',
+    max_rent INTEGER,
+    min_size INTEGER,
+    registration TEXT NOT NULL DEFAULT 'any',
+    particularity TEXT NOT NULL DEFAULT '',
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (subscriber_id) REFERENCES subscribers(id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_saved_searches_unique
+    ON saved_searches (
+        subscriber_id, city, area, IFNULL(max_rent, -1), IFNULL(min_size, -1),
+        registration, particularity
+    );
+CREATE INDEX IF NOT EXISTS idx_saved_searches_subscriber
+    ON saved_searches (subscriber_id, active);
+
+CREATE TABLE IF NOT EXISTS digest_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_key TEXT NOT NULL UNIQUE,
+    local_date TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    status TEXT NOT NULL,
+    channel_count INTEGER NOT NULL DEFAULT 0,
+    sent_count INTEGER NOT NULL DEFAULT 0,
+    skipped_count INTEGER NOT NULL DEFAULT 0,
+    failed_count INTEGER NOT NULL DEFAULT 0,
+    error_summary TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_digest_runs_date
+    ON digest_runs (local_date DESC);
+
+CREATE TABLE IF NOT EXISTS deliveries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    digest_run_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    local_date TEXT NOT NULL,
+    status TEXT NOT NULL,
+    provider_message_id TEXT,
+    error_summary TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    sent_at TEXT,
+    FOREIGN KEY (digest_run_id) REFERENCES digest_runs(id) ON DELETE CASCADE,
+    FOREIGN KEY (channel_id) REFERENCES notification_channels(id) ON DELETE CASCADE,
+    UNIQUE (channel_id, local_date)
+);
+CREATE INDEX IF NOT EXISTS idx_deliveries_channel
+    ON deliveries (channel_id, sent_at DESC);
+CREATE INDEX IF NOT EXISTS idx_deliveries_status
+    ON deliveries (status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS delivery_items (
+    delivery_id INTEGER NOT NULL,
+    listing_key TEXT NOT NULL,
+    PRIMARY KEY (delivery_id, listing_key),
+    FOREIGN KEY (delivery_id) REFERENCES deliveries(id) ON DELETE CASCADE,
+    FOREIGN KEY (listing_key) REFERENCES listings(raw_post_key) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS job_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_name TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    status TEXT NOT NULL,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    error_summary TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_job_runs_name_started
+    ON job_runs (job_name, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS admin_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    subject_type TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_admin_events_created
+    ON admin_events (created_at DESC);
 """
 
 

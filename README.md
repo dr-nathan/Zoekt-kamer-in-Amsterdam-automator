@@ -139,6 +139,36 @@ The production layout keeps deployable code separate from private runtime state:
 - Caddy: HTTPS, password protection and reverse proxy for `facebookrooms.nl`.
 - `facebookrooms-collect.timer`: optional randomized refresh every 30–40 minutes. Enable this only
   after a Facebook session and `OPENAI_API_KEY` have been installed on the VPS.
+- `facebookrooms-digest.timer`: personalized digests at 09:00 in the `Europe/Amsterdam` timezone.
+
+## Daily e-mail and Telegram alerts
+
+The current result filters can be saved from a city page. E-mail subscriptions use double opt-in;
+Telegram subscriptions open a bot deep link and become active only after the user presses Start.
+Each verified destination receives at most one combined message per day and never receives the same
+listing twice in the same digest. Days without new matching listings stay quiet.
+
+Configure providers interactively on the VPS:
+
+```bash
+cd /home/nathan/facebookrooms
+bash deploy/configure-notifications.sh
+```
+
+The script asks for a separate administrator password, optional Resend credentials, and optional
+Telegram BotFather credentials. It generates the application and Telegram webhook secrets, updates
+the private `.env`, installs the 09:00 timer, configures the Telegram webhook when possible, and
+reloads Caddy. For e-mail, verify `facebookrooms.nl` (or a sending subdomain) in Resend and register
+`https://facebookrooms.nl/webhooks/resend` as the webhook endpoint.
+
+Subscription verification, management, unsubscribe, and provider webhook routes bypass the shared
+website password because they carry signed, single-purpose tokens or verified webhook secrets.
+The `/admin` dashboard has its own Caddy password and is additionally inaccessible to requests that
+do not pass through the protected Caddy admin route.
+
+The dashboard shows masked recipients, saved-search counts, provider readiness, delivery results,
+collection/extraction job history, listing counts, and free disk space. It never displays raw private
+Facebook post text or provider secrets.
 
 Deployment templates are stored in `deploy/`. Never commit the Caddy password hash, `.env`, browser
 session or production database.

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Administration · Chineur2000</title>
+    <link rel="stylesheet" href="/static/site.css?v=20260925-1">
+  </head>
+  <body class="admin-page">
+    <header class="site-header admin-header">
+      <a class="brand" href="/admin" aria-label="Administration Chineur2000">
+        <span class="brand-mark" aria-hidden="true">C</span>
+        <span>Chineur<span>2000</span></span>
+      </a>
+      <span class="header-meta">Administration privée</span>
+    </header>
+
+    <main class="admin-shell shell">
+      <div class="admin-title">
+        <div>
+          <p class="eyebrow">État du service</p>
+          <h1>Tableau de bord</h1>
+        </div>
+        <div class="system-badges">
+          <span class="status-chip {{ 'ok' if providers.email else 'muted' }}">E-mail {{ 'actif' if providers.email else 'non configuré' }}</span>
+          <span class="status-chip {{ 'ok' if providers.telegram else 'muted' }}">Telegram {{ 'actif' if providers.telegram else 'non configuré' }}</span>
+          <span class="status-chip">{{ disk_free_gb }} Go libres</span>
+        </div>
+      </div>
+
+      <section class="metric-grid" aria-label="Indicateurs principaux">
+        <article><span>Abonnements actifs</span><strong>{{ snapshot.channel_counts.get('active', 0) }}</strong></article>
+        <article><span>En attente</span><strong>{{ snapshot.channel_counts.get('pending', 0) }}</strong></article>
+        <article><span>Amsterdam</span><strong>{{ snapshot.listing_stats.get('amsterdam', 0) }}</strong></article>
+        <article><span>Lausanne</span><strong>{{ snapshot.listing_stats.get('lausanne', 0) }}</strong></article>
+      </section>
+
+      <section class="admin-panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow">Destinataires</p><h2>Abonnements</h2></div>
+          <span>{{ snapshot.channels|length }} affichés</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Canal</th><th>Destination</th><th>Filtres</th><th>Statut</th><th>Dernier envoi</th><th>Action</th></tr></thead>
+            <tbody>
+              {% for channel in snapshot.channels %}
+                <tr>
+                  <td>{{ channel.type|capitalize }}</td>
+                  <td><strong>{{ channel.display_name or channel.destination }}</strong><small>{{ channel.destination if channel.display_name else '' }}</small></td>
+                  <td>{{ channel.search_count }}</td>
+                  <td><span class="status-chip {{ 'ok' if channel.status == 'active' else 'muted' }}">{{ channel.status }}</span></td>
+                  <td>{{ channel.last_sent_at or 'Jamais' }}</td>
+                  <td>
+                    <form method="post" action="/admin/channels/{{ channel.id }}">
+                      <input type="hidden" name="csrf" value="{{ csrf }}">
+                      <input type="hidden" name="action" value="{{ 'pause' if channel.status == 'active' else 'resume' }}">
+                      <button class="text-button" type="submit">{{ 'Pause' if channel.status == 'active' else 'Réactiver' }}</button>
+                    </form>
+                  </td>
+                </tr>
+              {% else %}
+                <tr><td colspan="6">Aucun abonnement pour le moment.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <div class="admin-two-column">
+        <section class="admin-panel">
+          <div class="panel-heading"><div><p class="eyebrow">Automatisation</p><h2>Derniers travaux</h2></div></div>
+          <div class="run-list">
+            {% for job in snapshot.jobs[:15] %}
+              <article>
+                <span class="status-dot {{ 'ok' if job.status == 'success' else ('error' if job.status == 'failed' else '') }}"></span>
+                <div><strong>{{ job.job_name }}</strong><small>{{ job.started_at }}</small></div>
+                <span>{{ job.status }}</span>
+              </article>
+            {% else %}
+              <p class="muted-copy">Les prochaines collectes apparaîtront ici.</p>
+            {% endfor %}
+          </div>
+        </section>
+
+        <section class="admin-panel">
+          <div class="panel-heading"><div><p class="eyebrow">09:00 Amsterdam</p><h2>Récapitulatifs</h2></div></div>
+          <div class="run-list">
+            {% for run in snapshot.digests[:15] %}
+              <article>
+                <span class="status-dot {{ 'ok' if run.status == 'success' else ('error' if run.failed_count else '') }}"></span>
+                <div><strong>{{ run.local_date }}</strong><small>{{ run.sent_count }} envoyé · {{ run.skipped_count }} sans nouveauté</small></div>
+                <span>{{ run.status }}</span>
+              </article>
+            {% else %}
+              <p class="muted-copy">Aucun récapitulatif envoyé pour le moment.</p>
+            {% endfor %}
+          </div>
+        </section>
+      </div>
+
+      <section class="admin-panel">
+        <div class="panel-heading"><div><p class="eyebrow">Transport</p><h2>Dernières livraisons</h2></div></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Date</th><th>Canal</th><th>Statut</th><th>Envoyé</th><th>Erreur</th></tr></thead>
+            <tbody>
+              {% for delivery in snapshot.deliveries %}
+                <tr><td>{{ delivery.local_date }}</td><td>{{ delivery.channel_type }}</td><td>{{ delivery.status }}</td><td>{{ delivery.sent_at or '—' }}</td><td>{{ delivery.error_summary or '—' }}</td></tr>
+              {% else %}
+                <tr><td colspan="5">Aucune livraison.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

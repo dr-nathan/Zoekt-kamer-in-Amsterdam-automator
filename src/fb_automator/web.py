@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import html
+import hmac
 import json
 import os
 import re
+import shutil
 import sqlite3
+import urllib.parse
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -14,15 +18,26 @@ from typing import Any
 from urllib.parse import quote, urlparse
 
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from fb_automator.listing_models import AmsterdamNeighborhood, LausanneNeighborhood
+from fb_automator.notifications import (
+    NotificationSettings,
+    NotificationStore,
+    SearchSpec,
+    csrf_token,
+    send_resend_email,
+    send_telegram_message,
+    sign_action,
+    verify_action,
+    verify_csrf,
+)
 
 DEFAULT_DATABASE = Path("data/listings.db")
 ASSET_ROOT = Path(__file__).parent / "web_assets"
-ASSET_VERSION = "20260924-2"
+ASSET_VERSION = "20260925-1"
 LISTING_MAX_AGE_DAYS = 14
 
 
@@ -398,6 +413,7 @@ class ListingRepository:
 def create_app(database: Path | None = None, now: datetime | None = None) -> FastAPI:
     database_path = database or Path(os.environ.get("FB_DATABASE", DEFAULT_DATABASE))
     repository = ListingRepository(database_path, now=now)
+    notification_settings = NotificationSettings.from_env()
     templates = Environment(
         loader=FileSystemLoader(ASSET_ROOT / "templates"),
         autoescape=select_autoescape(["html", "xml"]),
@@ -480,8 +496,362 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
                 ),
                 database_ready=database_path.exists(),
                 max_age_days=LISTING_MAX_AGE_DAYS,
+                notifications_available=(
+                    notification_settings.email_enabled
+                    or notification_settings.telegram_enabled
+                ),
+                email_notifications_available=notification_settings.email_enabled,
+                telegram_notifications_available=notification_settings.telegram_enabled,
+                telegram_bot_username=notification_settings.telegram_bot_username,
+                subscription_csrf=csrf_token(
+                    notification_settings.app_secret, "subscribe"
+                ),
             )
         )
+
+    @application.post("/subscriptions/email", response_class=HTMLResponse)
+    async def subscribe_email(request: Request) -> HTMLResponse:
+        data = await _form_values(request)
+        if not notification_settings.email_enabled:
+            return _message_response(
+                templates,
+                "Notifications indisponibles",
+                "L’envoi par e-mail n’est pas encore configuré.",
+                status_code=503,
+            )
+        if not verify_csrf(
+            notification_settings.app_secret, "subscribe", data.get("csrf", "")
+        ):
+            return _message_response(
+                templates, "Lien expiré", "Rechargez la page et réessayez.", status_code=403
+            )
+        try:
+            search = _search_spec_from_values(data)
+            with NotificationStore(database_path) as store:
+                channel, verification_token = store.create_email_subscription(
+                    data.get("email", ""), search, data.get("display_name", "")
+                )
+            if verification_token is None:
+                return _message_response(
+                    templates,
+                    "Filtres enregistrés",
+                    "Cette adresse est déjà vérifiée. Les nouveaux filtres ont été ajoutés à son récapitulatif quotidien.",
+                )
+            verification_url = (
+                f"{notification_settings.base_url}/subscriptions/confirm/{verification_token}"
+            )
+            safe_url = html.escape(verification_url, quote=True)
+            send_resend_email(
+                notification_settings,
+                to=channel.destination,
+                subject="Confirmez vos alertes Chineur2000",
+                html_body=(
+                    "<p>Confirmez votre adresse pour recevoir chaque matin les nouvelles annonces "
+                    f"correspondant à vos filtres.</p><p><a href='{safe_url}'>"
+                    "Confirmer mes alertes</a></p>"
+                ),
+                text_body=(
+                    "Confirmez votre adresse pour recevoir les alertes Chineur2000 :\n"
+                    f"{verification_url}\n"
+                ),
+            )
+        except ValueError as exc:
+            return _message_response(
+                templates, "Informations invalides", str(exc), status_code=400
+            )
+        except RuntimeError:
+            return _message_response(
+                templates,
+                "Adresse enregistrée",
+                "L’adresse a été enregistrée, mais le message de vérification n’a pas pu partir. Réessayez dans quelques minutes.",
+                status_code=502,
+            )
+        return _message_response(
+            templates,
+            "Vérifiez votre boîte mail",
+            "Cliquez sur le lien reçu pour activer le récapitulatif quotidien de 09:00.",
+        )
+
+    @application.post("/subscriptions/telegram")
+    async def subscribe_telegram(request: Request) -> HTMLResponse:
+        data = await _form_values(request)
+        if not notification_settings.telegram_enabled:
+            return _message_response(
+                templates,
+                "Telegram indisponible",
+                "Le bot Telegram n’est pas encore configuré.",
+                status_code=503,
+            )
+        if not verify_csrf(
+            notification_settings.app_secret, "subscribe", data.get("csrf", "")
+        ):
+            return _message_response(
+                templates, "Lien expiré", "Rechargez la page et réessayez.", status_code=403
+            )
+        try:
+            search = _search_spec_from_values(data)
+            with NotificationStore(database_path) as store:
+                _, verification_token = store.create_telegram_subscription(
+                    search, data.get("display_name", "")
+                )
+        except ValueError as exc:
+            return _message_response(
+                templates, "Informations invalides", str(exc), status_code=400
+            )
+        bot_url = (
+            f"https://t.me/{notification_settings.telegram_bot_username}"
+            f"?start={urllib.parse.quote(verification_token)}"
+        )
+        return RedirectResponse(bot_url, status_code=303)
+
+    @application.get("/subscriptions/confirm/{token}", response_class=HTMLResponse)
+    def confirm_email(token: str) -> HTMLResponse:
+        with NotificationStore(database_path) as store:
+            channel = store.verify_email(token)
+        if channel is None:
+            return _message_response(
+                templates,
+                "Lien invalide",
+                "Ce lien a déjà été utilisé ou n’est plus valable.",
+                status_code=400,
+            )
+        return _message_response(
+            templates,
+            "Alertes activées",
+            "Votre prochain récapitulatif sera envoyé à 09:00, heure d’Amsterdam.",
+        )
+
+    @application.get("/subscriptions/manage/{token}", response_class=HTMLResponse)
+    def manage_subscription(token: str) -> HTMLResponse:
+        channel_id = verify_action(notification_settings.app_secret, "manage", token)
+        if channel_id is None:
+            return _message_response(
+                templates, "Lien invalide", "Ce lien de gestion n’est pas valable.", status_code=400
+            )
+        try:
+            with NotificationStore(database_path) as store:
+                channel = store.get_channel(channel_id)
+                searches = store.list_searches(channel.subscriber_id)
+        except KeyError:
+            return _message_response(
+                templates, "Abonnement introuvable", "Cet abonnement n’existe plus.", status_code=404
+            )
+        template = templates.get_template("manage.html")
+        return HTMLResponse(
+            template.render(channel=channel, searches=searches, token=token)
+        )
+
+    @application.post("/subscriptions/manage/{token}")
+    async def update_subscription(token: str, request: Request):
+        channel_id = verify_action(notification_settings.app_secret, "manage", token)
+        if channel_id is None:
+            return _message_response(
+                templates, "Lien invalide", "Ce lien de gestion n’est pas valable.", status_code=400
+            )
+        data = await _form_values(request)
+        try:
+            with NotificationStore(database_path) as store:
+                channel = store.get_channel(channel_id)
+                action = data.get("action", "")
+                if action == "pause":
+                    store.set_channel_status(channel.id, "paused")
+                elif action == "resume":
+                    store.set_channel_status(channel.id, "active")
+                elif action in {"enable_search", "disable_search"}:
+                    search_id = int(data.get("search_id", "0"))
+                    store.set_search_active(
+                        search_id,
+                        channel.subscriber_id,
+                        action == "enable_search",
+                    )
+                else:
+                    raise ValueError("Action inconnue")
+        except (KeyError, ValueError):
+            return _message_response(
+                templates, "Action invalide", "La modification n’a pas été appliquée.", status_code=400
+            )
+        return RedirectResponse(f"/subscriptions/manage/{token}", status_code=303)
+
+    @application.get("/unsubscribe/{token}", response_class=HTMLResponse)
+    def unsubscribe_page(token: str) -> HTMLResponse:
+        channel_id = verify_action(notification_settings.app_secret, "unsubscribe", token)
+        if channel_id is None:
+            return _message_response(
+                templates, "Lien invalide", "Ce lien de désabonnement n’est pas valable.", status_code=400
+            )
+        try:
+            with NotificationStore(database_path) as store:
+                channel = store.get_channel(channel_id)
+        except KeyError:
+            return _message_response(
+                templates, "Abonnement introuvable", "Cet abonnement n’existe plus.", status_code=404
+            )
+        template = templates.get_template("unsubscribe.html")
+        return HTMLResponse(template.render(channel=channel, token=token, unsubscribed=False))
+
+    @application.post("/unsubscribe/{token}", response_class=HTMLResponse)
+    def unsubscribe(token: str) -> HTMLResponse:
+        channel_id = verify_action(notification_settings.app_secret, "unsubscribe", token)
+        if channel_id is None:
+            return _message_response(
+                templates, "Lien invalide", "Ce lien de désabonnement n’est pas valable.", status_code=400
+            )
+        with NotificationStore(database_path) as store:
+            changed = store.set_channel_status(channel_id, "unsubscribed")
+            channel = store.get_channel(channel_id) if changed else None
+        if channel is None:
+            return _message_response(
+                templates, "Abonnement introuvable", "Cet abonnement n’existe plus.", status_code=404
+            )
+        template = templates.get_template("unsubscribe.html")
+        return HTMLResponse(template.render(channel=channel, token=token, unsubscribed=True))
+
+    @application.post("/webhooks/telegram")
+    async def telegram_webhook(request: Request) -> JSONResponse:
+        supplied_secret = request.headers.get("x-telegram-bot-api-secret-token", "")
+        if (
+            not notification_settings.telegram_enabled
+            or not hmac.compare_digest(
+                supplied_secret, notification_settings.telegram_webhook_secret
+            )
+        ):
+            return JSONResponse({"ok": False}, status_code=403)
+        try:
+            payload = await request.json()
+        except json.JSONDecodeError:
+            return JSONResponse({"ok": False}, status_code=400)
+
+        message = payload.get("message") or {}
+        callback = payload.get("callback_query") or {}
+        if callback:
+            message = callback.get("message") or {}
+        chat = message.get("chat") or {}
+        chat_id = str(chat.get("id") or "")
+        if not chat_id:
+            return JSONResponse({"ok": True})
+        text = str(message.get("text") or "").strip()
+        callback_data = str(callback.get("data") or "")
+        username = str((message.get("from") or callback.get("from") or {}).get("username") or "")
+        display = f"@{username}" if username else "Telegram"
+
+        response_text = ""
+        channel = None
+        with NotificationStore(database_path) as store:
+            if text.startswith("/start "):
+                raw_token = text.split(maxsplit=1)[1]
+                channel = store.verify_telegram(raw_token, chat_id, display)
+                response_text = (
+                    "Alertes Chineur2000 activées. Le récapitulatif arrive chaque jour à 09:00."
+                    if channel
+                    else "Ce lien d’activation est invalide ou a déjà été utilisé."
+                )
+            elif text.startswith("/stop") or callback_data == "unsubscribe":
+                channel = store.channel_by_destination("telegram", chat_id)
+                if channel:
+                    store.set_channel_status(channel.id, "unsubscribed")
+                response_text = "Les alertes Telegram ont été arrêtées."
+            elif text.startswith("/settings"):
+                channel = store.channel_by_destination("telegram", chat_id)
+                response_text = (
+                    "Utilisez le bouton ci-dessous pour gérer vos filtres."
+                    if channel
+                    else "Aucun abonnement actif n’est associé à cette conversation."
+                )
+            else:
+                channel = store.channel_by_destination("telegram", chat_id)
+                response_text = "Commandes disponibles : /settings et /stop."
+
+        reply_markup = None
+        if channel and channel.status != "unsubscribed":
+            manage_token = sign_action(notification_settings.app_secret, "manage", channel.id)
+            unsubscribe_token = sign_action(
+                notification_settings.app_secret, "unsubscribe", channel.id
+            )
+            reply_markup = {
+                "inline_keyboard": [
+                    [
+                        {
+                            "text": "Gérer mes filtres",
+                            "url": f"{notification_settings.base_url}/subscriptions/manage/{manage_token}",
+                        }
+                    ],
+                    [
+                        {
+                            "text": "Se désabonner",
+                            "url": f"{notification_settings.base_url}/unsubscribe/{unsubscribe_token}",
+                        }
+                    ],
+                ]
+            }
+        try:
+            send_telegram_message(
+                notification_settings,
+                chat_id=chat_id,
+                text=response_text,
+                reply_markup=reply_markup,
+            )
+        except RuntimeError:
+            pass
+        return JSONResponse({"ok": True})
+
+    @application.post("/webhooks/resend")
+    async def resend_webhook(request: Request) -> JSONResponse:
+        if not notification_settings.resend_webhook_secret:
+            return JSONResponse({"ok": False}, status_code=503)
+        raw_body = await request.body()
+        try:
+            from svix.webhooks import Webhook, WebhookVerificationError
+
+            event = Webhook(notification_settings.resend_webhook_secret).verify(
+                raw_body, dict(request.headers)
+            )
+        except (WebhookVerificationError, ValueError):
+            return JSONResponse({"ok": False}, status_code=403)
+        event_type = str(event.get("type") or "")
+        data = event.get("data") or {}
+        provider_message_id = str(data.get("email_id") or data.get("id") or "")
+        with NotificationStore(database_path) as store:
+            recorded = store.record_email_event(event_type, provider_message_id)
+        return JSONResponse({"ok": True, "recorded": recorded})
+
+    @application.get("/admin", response_class=HTMLResponse)
+    def admin_dashboard(request: Request) -> HTMLResponse:
+        if request.headers.get("x-chineur-admin") != "1":
+            return HTMLResponse("Introuvable", status_code=404)
+        with NotificationStore(database_path) as store:
+            snapshot = store.admin_snapshot()
+        disk = shutil.disk_usage(database_path.parent)
+        template = templates.get_template("admin.html")
+        return HTMLResponse(
+            template.render(
+                snapshot=snapshot,
+                disk_free_gb=round(disk.free / (1024**3), 1),
+                providers={
+                    "email": notification_settings.email_enabled,
+                    "telegram": notification_settings.telegram_enabled,
+                },
+                csrf=csrf_token(notification_settings.app_secret, "admin"),
+            )
+        )
+
+    @application.post("/admin/channels/{channel_id}")
+    async def admin_update_channel(channel_id: int, request: Request):
+        if request.headers.get("x-chineur-admin") != "1":
+            return HTMLResponse("Introuvable", status_code=404)
+        data = await _form_values(request)
+        if not verify_csrf(
+            notification_settings.app_secret, "admin", data.get("csrf", "")
+        ):
+            return HTMLResponse("Action expirée", status_code=403)
+        action = data.get("action", "")
+        status = {"pause": "paused", "resume": "active", "unsubscribe": "unsubscribed"}.get(
+            action
+        )
+        if status is None:
+            return HTMLResponse("Action invalide", status_code=400)
+        with NotificationStore(database_path) as store:
+            store.set_channel_status(channel_id, status)
+        return RedirectResponse("/admin", status_code=303)
 
     @application.get("/health")
     def health() -> dict[str, str]:
@@ -645,6 +1015,54 @@ def _optional_int(value: str, *, maximum: int) -> int | None:
     except ValueError:
         return None
     return parsed if 0 <= parsed <= maximum else None
+
+
+async def _form_values(request: Request) -> dict[str, str]:
+    content_type = request.headers.get("content-type", "")
+    if "application/x-www-form-urlencoded" not in content_type:
+        return {}
+    body = (await request.body()).decode("utf-8", errors="replace")
+    return {
+        key: values[-1]
+        for key, values in urllib.parse.parse_qs(
+            body, keep_blank_values=True, max_num_fields=30
+        ).items()
+    }
+
+
+def _search_spec_from_values(values: dict[str, str]) -> SearchSpec:
+    city_slug = values.get("city", "").strip().casefold()
+    city = CITIES.get(city_slug)
+    if city is None:
+        raise ValueError("Ville invalide.")
+    area = values.get("area", "").strip()
+    if area and area not in city.neighborhoods:
+        raise ValueError("Quartier invalide.")
+    registration = values.get("registration", "any").strip()
+    if registration not in {"any", "allowed", "required", "not_allowed"}:
+        raise ValueError("Filtre de domiciliation invalide.")
+    particularity = values.get("particularity", "").strip()[:80]
+    return SearchSpec(
+        city=city_slug,
+        area=area,
+        max_rent=_optional_int(values.get("max_rent", ""), maximum=10_000),
+        min_size=_optional_int(values.get("min_size", ""), maximum=1_000),
+        registration=registration,
+        particularity=particularity,
+    )
+
+
+def _message_response(
+    templates: Environment,
+    title: str,
+    message: str,
+    *,
+    status_code: int = 200,
+) -> HTMLResponse:
+    template = templates.get_template("message.html")
+    return HTMLResponse(
+        template.render(title=title, message=message), status_code=status_code
+    )
 
 
 app = create_app()

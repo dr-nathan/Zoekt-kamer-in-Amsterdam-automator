@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Gérer mes alertes · Chineur2000</title>
+    <link rel="stylesheet" href="/static/site.css?v=20260925-1">
+  </head>
+  <body class="utility-page">
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Accueil Chineur2000">
+        <span class="brand-mark" aria-hidden="true">C</span>
+        <span>Chineur<span>2000</span></span>
+      </a>
+      <span class="header-meta">Alertes de 09:00</span>
+    </header>
+    <main class="utility-shell shell">
+      <section class="utility-card manage-card">
+        <p class="eyebrow">{{ channel.channel_type|capitalize }}</p>
+        <h1>Gérer mes alertes</h1>
+        <p class="utility-lead">{{ channel.masked_destination }} · statut&nbsp;: {{ channel.status }}</p>
+
+        <div class="manage-actions">
+          <form method="post" action="/subscriptions/manage/{{ token }}">
+            {% if channel.status == 'active' %}
+              <input type="hidden" name="action" value="pause">
+              <button class="secondary-button" type="submit">Mettre les alertes en pause</button>
+            {% else %}
+              <input type="hidden" name="action" value="resume">
+              <button class="primary-button compact-button" type="submit">Réactiver les alertes</button>
+            {% endif %}
+          </form>
+        </div>
+
+        <h2>Filtres enregistrés</h2>
+        <div class="saved-search-list">
+          {% for search in searches %}
+            <article class="saved-search{% if not search.active %} is-paused{% endif %}">
+              <div>
+                <strong>{{ search.city|capitalize }}{% if search.area %} · {{ search.area }}{% endif %}</strong>
+                <span>
+                  {% if search.max_rent %}Loyer ≤ {{ search.max_rent }}{% endif %}
+                  {% if search.min_size %} · Surface ≥ {{ search.min_size }} m²{% endif %}
+                  {% if search.particularity %} · {{ search.particularity }}{% endif %}
+                </span>
+              </div>
+              <form method="post" action="/subscriptions/manage/{{ token }}">
+                <input type="hidden" name="search_id" value="{{ search.id }}">
+                <input type="hidden" name="action" value="{{ 'disable_search' if search.active else 'enable_search' }}">
+                <button class="text-button" type="submit">{{ 'Désactiver' if search.active else 'Réactiver' }}</button>
+              </form>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

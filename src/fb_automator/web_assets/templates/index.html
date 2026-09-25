@@ -106,6 +106,45 @@
           </form>
         </div>
 
+        {% if notifications_available %}
+          <details class="digest-panel">
+            <summary>
+              <span><strong>Recevoir ces annonces chaque matin</strong><small>Un seul récapitulatif à 09:00, uniquement s’il y a du nouveau.</small></span>
+              <span aria-hidden="true">＋</span>
+            </summary>
+            <div class="digest-content">
+              {% if email_notifications_available %}
+                <form class="digest-form" method="post" action="/subscriptions/email">
+                  <input type="hidden" name="csrf" value="{{ subscription_csrf }}">
+                  <input type="hidden" name="city" value="{{ city.slug }}">
+                  <input type="hidden" name="area" value="{{ filters.area }}">
+                  <input type="hidden" name="max_rent" value="{{ filters.max_rent if filters.max_rent is not none else '' }}">
+                  <input type="hidden" name="min_size" value="{{ filters.min_size if filters.min_size is not none else '' }}">
+                  <input type="hidden" name="registration" value="{{ filters.registration }}">
+                  <input type="hidden" name="particularity" value="{{ filters.particularity }}">
+                  <label><span>Prénom facultatif</span><input name="display_name" maxlength="120" autocomplete="name" placeholder="Alex"></label>
+                  <label><span>Adresse e-mail</span><input name="email" type="email" required autocomplete="email" placeholder="alex@example.com"></label>
+                  <button class="primary-button compact-button" type="submit">Activer par e-mail</button>
+                </form>
+              {% endif %}
+              {% if telegram_notifications_available %}
+                <form class="digest-form telegram-form" method="post" action="/subscriptions/telegram">
+                  <input type="hidden" name="csrf" value="{{ subscription_csrf }}">
+                  <input type="hidden" name="city" value="{{ city.slug }}">
+                  <input type="hidden" name="area" value="{{ filters.area }}">
+                  <input type="hidden" name="max_rent" value="{{ filters.max_rent if filters.max_rent is not none else '' }}">
+                  <input type="hidden" name="min_size" value="{{ filters.min_size if filters.min_size is not none else '' }}">
+                  <input type="hidden" name="registration" value="{{ filters.registration }}">
+                  <input type="hidden" name="particularity" value="{{ filters.particularity }}">
+                  <label><span>Prénom facultatif</span><input name="display_name" maxlength="120" autocomplete="name" placeholder="Alex"></label>
+                  <p>Telegram s’ouvrira sur <strong>@{{ telegram_bot_username }}</strong>. Appuyez ensuite sur Start pour relier votre conversation.</p>
+                  <button class="secondary-button compact-button" type="submit">Connecter Telegram</button>
+                </form>
+              {% endif %}
+            </div>
+          </details>
+        {% endif %}
+
         {% if listings %}
           <div class="listing-grid">
             {% for listing in listings %}

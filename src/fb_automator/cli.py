@@ -5,8 +5,10 @@ from pathlib import Path
 
 from fb_automator.collector import FacebookCollector
 from fb_automator.config import load_groups
+from fb_automator.digest import send_daily_digests
 from fb_automator.extractor import extract_database
 from fb_automator.image_reviewer import review_database_images
+from fb_automator.notifications import tracked_job
 
 DEFAULT_PROFILE = Path(".state/facebook-profile")
 DEFAULT_DATABASE = Path("data/listings.db")
@@ -73,6 +75,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip cached cover-image selection after text extraction.",
     )
 
+    digest = subparsers.add_parser(
+        "digest", help="Send each verified subscriber one daily matched-listing digest."
+    )
+    digest.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
     serve = subparsers.add_parser(
         "serve", help="Serve the private Chineur2000 web application."
     )
@@ -95,20 +102,49 @@ def main() -> None:
         uvicorn.run("fb_automator.web:app", host=args.host, port=args.port)
         return
 
+    if args.command == "digest":
+        try:
+            with tracked_job(args.database, "digest") as details:
+                result = send_daily_digests(args.database)
+                details.update(
+                    {
+                        "channels": result.channels,
+                        "sent": result.sent,
+                        "skipped": result.skipped,
+                        "failed": result.failed,
+                    }
+                )
+        except (RuntimeError, ValueError) as exc:
+            raise SystemExit(f"error: {exc}") from exc
+        print(
+            f"channels={result.channels} sent={result.sent} "
+            f"skipped={result.skipped} failed={result.failed}"
+        )
+        return
+
     if args.command == "extract":
         if args.limit is not None and args.limit < 1:
             raise SystemExit("error: --limit must be at least 1")
         if args.workers < 1:
             raise SystemExit("error: --workers must be at least 1")
         try:
-            processed, cached, remaining, total = extract_database(
-                args.database,
-                model=args.model,
-                force=args.force,
-                limit=args.limit,
-                workers=args.workers,
-                progress=lambda done, count: print(f"extracting {done}/{count}"),
-            )
+            with tracked_job(args.database, "extract") as details:
+                processed, cached, remaining, total = extract_database(
+                    args.database,
+                    model=args.model,
+                    force=args.force,
+                    limit=args.limit,
+                    workers=args.workers,
+                    progress=lambda done, count: print(f"extracting {done}/{count}"),
+                )
+                details.update(
+                    {
+                        "extracted": processed,
+                        "cached": cached,
+                        "pending": remaining,
+                        "database_total": total,
+                    }
+                )
         except (RuntimeError, ValueError) as exc:
             raise SystemExit(f"error: {exc}") from exc
         print(
@@ -117,17 +153,26 @@ def main() -> None:
         )
         if not args.skip_image_review:
             try:
-                reviewed, image_cached, image_remaining, image_total = (
-                    review_database_images(
-                        args.database,
-                        model=args.vision_model,
-                        limit=args.limit,
-                        workers=args.workers,
-                        progress=lambda done, count: print(
-                            f"reviewing images {done}/{count}"
-                        ),
+                with tracked_job(args.database, "image_review") as details:
+                    reviewed, image_cached, image_remaining, image_total = (
+                        review_database_images(
+                            args.database,
+                            model=args.vision_model,
+                            limit=args.limit,
+                            workers=args.workers,
+                            progress=lambda done, count: print(
+                                f"reviewing images {done}/{count}"
+                            ),
+                        )
                     )
-                )
+                    details.update(
+                        {
+                            "reviewed": reviewed,
+                            "cached": image_cached,
+                            "pending": image_remaining,
+                            "image_total": image_total,
+                        }
+                    )
             except (RuntimeError, ValueError) as exc:
                 raise SystemExit(f"error: image review failed: {exc}") from exc
             print(
@@ -153,11 +198,13 @@ def main() -> None:
                 raise ValueError("Collection limits must be non-negative.")
             if args.scroll_pause < 2:
                 raise ValueError("Scroll pause must be at least 2 seconds.")
-            collector.collect(
-                load_groups(args.groups),
-                max_posts=args.max_posts,
-                max_scrolls=args.max_scrolls,
-            )
+            with tracked_job(args.database, "collect") as details:
+                result = collector.collect(
+                    load_groups(args.groups),
+                    max_posts=args.max_posts,
+                    max_scrolls=args.max_scrolls,
+                )
+                details["result"] = str(result)
     except (RuntimeError, ValueError) as exc:
         raise SystemExit(f"error: {exc}") from exc
 

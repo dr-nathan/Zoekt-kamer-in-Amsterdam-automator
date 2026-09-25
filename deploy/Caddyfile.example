@@ -1,9 +1,25 @@
 facebookrooms.nl, www.facebookrooms.nl {
 	encode zstd gzip
 
-	basic_auth {
-		nathan REPLACE_WITH_CADDY_PASSWORD_HASH
+	@admin path /admin /admin/*
+	handle @admin {
+		basic_auth {
+			admin REPLACE_WITH_ADMIN_PASSWORD_HASH
+		}
+		reverse_proxy 127.0.0.1:8000 {
+			header_up X-Chineur-Admin "1"
+		}
 	}
 
-	reverse_proxy 127.0.0.1:8000
+	@public_notification_routes path /subscriptions/confirm/* /subscriptions/manage/* /unsubscribe/* /webhooks/telegram /webhooks/resend
+	handle @public_notification_routes {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle {
+		basic_auth {
+			nathan REPLACE_WITH_CADDY_PASSWORD_HASH
+		}
+		reverse_proxy 127.0.0.1:8000
+	}
 }

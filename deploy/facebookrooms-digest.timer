@@ -1,0 +1,10 @@
+[Unit]
+Description=Send Chineur2000 digests daily at 09:00 Amsterdam time
+
+[Timer]
+OnCalendar=*-*-* 09:00:00 Europe/Amsterdam
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
