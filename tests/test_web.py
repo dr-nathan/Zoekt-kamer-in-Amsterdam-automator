@@ -146,6 +146,176 @@ class ListingRepositoryTests(unittest.TestCase):
         results = ListingRepository(self.database, now=self.now).search(ListingSearch())
         self.assertEqual(len(results), 1)
 
+    def test_same_group_repost_with_rephrased_summary_is_shown_once(self) -> None:
+        connection = sqlite3.connect(self.database)
+        try:
+            connection.execute(
+                """
+                INSERT INTO raw_posts (
+                    dedupe_key, source_city, group_name, group_url, post_id, post_url,
+                    text, published_label, reaction_count, comment_count,
+                    first_seen_at, last_seen_at, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "repost", "lausanne", "Logements Lausanne",
+                    "https://facebook.com/groups/example", "43",
+                    "https://facebook.com/groups/example/posts/43",
+                    "Chambre rue Sous-Gare, loyer CHF 850, dès octobre.",
+                    "Today", 20, 7, "2026-09-18T09:00:00+00:00",
+                    "2026-09-18T10:00:00+00:00", "{}",
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO listings (
+                    raw_post_key, listing_kind, monthly_rent, utilities,
+                    deposit_amount, deposit_months, room_size_m2, property_size_m2,
+                    location_text, city, neighborhood, available_from, available_to,
+                    lease_type, registration, furnishing, gender, age_min, age_max,
+                    language_requirement, internationals, applicant_status,
+                    private_bathroom, amenities_json, particularities_json, summary,
+                    evidence_json, source_hash, extraction_version, extracted_at
+                ) VALUES (
+                    ?, 'offer', 850, 'included', NULL, NULL, 16, NULL,
+                    'Lausanne, secteur Sous-Gare', 'Lausanne', 'Sous-Gare / Ouchy',
+                    '2026-10-01', NULL, 'indefinite', 'allowed', 'furnished', 'any',
+                    NULL, NULL, 'none', 'welcome', 'any', 0, '[]', '[]',
+                    'Une chambre meublée est proposée à Sous-Gare dès octobre pour CHF 850.',
+                    '[]', 'repost-hash', 'test', '2026-09-18T10:01:00+00:00'
+                )
+                """,
+                ("repost",),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        results = ListingRepository(self.database, now=self.now).search(ListingSearch())
+
+        self.assertEqual(len(results), 1)
+        connection = sqlite3.connect(self.database)
+        try:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM raw_posts").fetchone()[0], 2)
+        finally:
+            connection.close()
+
+    def test_similar_same_group_listings_with_conflicting_address_stay_separate(self) -> None:
+        connection = sqlite3.connect(self.database)
+        try:
+            connection.execute(
+                """
+                INSERT INTO raw_posts (
+                    dedupe_key, source_city, group_name, group_url, post_id, post_url,
+                    text, published_label, reaction_count, comment_count,
+                    first_seen_at, last_seen_at, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "other-room", "lausanne", "Logements Lausanne",
+                    "https://facebook.com/groups/example", "99",
+                    "https://facebook.com/groups/example/posts/99",
+                    "Une autre chambre à Lausanne", "Today", 1, 0,
+                    "2026-09-18T09:00:00+00:00", "2026-09-18T10:00:00+00:00", "{}",
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO listings (
+                    raw_post_key, listing_kind, monthly_rent, utilities,
+                    deposit_amount, deposit_months, room_size_m2, property_size_m2,
+                    location_text, city, neighborhood, available_from, available_to,
+                    lease_type, registration, furnishing, gender, age_min, age_max,
+                    language_requirement, internationals, applicant_status,
+                    private_bathroom, amenities_json, particularities_json, summary,
+                    evidence_json, source_hash, extraction_version, extracted_at
+                ) VALUES (
+                    ?, 'offer', 850, 'included', NULL, NULL, 16, NULL,
+                    'Lausanne, Chailly', 'Lausanne', 'Chailly / Sallaz',
+                    '2026-11-01', NULL, 'indefinite', 'allowed', 'furnished', 'any',
+                    NULL, NULL, 'none', 'welcome', 'any', 0, '[]', '[]',
+                    'Chambre lumineuse et meublée à Chailly dans une colocation.',
+                    '[]', 'other-hash', 'test', '2026-09-18T10:01:00+00:00'
+                )
+                """,
+                ("other-room",),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        results = ListingRepository(self.database, now=self.now).search(ListingSearch())
+
+        self.assertEqual(len(results), 2)
+
+    def test_shared_photo_and_matching_rent_detect_repost(self) -> None:
+        connection = sqlite3.connect(self.database)
+        try:
+            connection.execute(
+                """
+                INSERT INTO raw_posts (
+                    dedupe_key, source_city, group_name, group_url, post_id, post_url,
+                    text, published_label, reaction_count, comment_count,
+                    first_seen_at, last_seen_at, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "photo-repost", "lausanne", "Logements Lausanne",
+                    "https://facebook.com/groups/example", "44",
+                    "https://facebook.com/groups/example/posts/44", "Texte entièrement reformulé",
+                    "Today", 2, 1, "2026-09-18T09:00:00+00:00",
+                    "2026-09-18T10:00:00+00:00", "{}",
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO listings (
+                    raw_post_key, listing_kind, monthly_rent, utilities,
+                    deposit_amount, deposit_months, room_size_m2, property_size_m2,
+                    location_text, city, neighborhood, available_from, available_to,
+                    lease_type, registration, furnishing, gender, age_min, age_max,
+                    language_requirement, internationals, applicant_status,
+                    private_bathroom, amenities_json, particularities_json, summary,
+                    evidence_json, source_hash, extraction_version, extracted_at
+                ) SELECT ?, listing_kind, monthly_rent, utilities,
+                    deposit_amount, deposit_months, room_size_m2, property_size_m2,
+                    'Lausanne', city, neighborhood, available_from, available_to,
+                    lease_type, registration, furnishing, gender, age_min, age_max,
+                    language_requirement, internationals, applicant_status,
+                    private_bathroom, amenities_json, particularities_json,
+                    'Annonce republiée avec une description différente.', evidence_json,
+                    'photo-repost-hash', extraction_version, extracted_at
+                FROM listings WHERE raw_post_key = 'abc123'
+                """,
+                ("photo-repost",),
+            )
+            connection.execute(
+                """
+                UPDATE post_images SET content_hash = ? WHERE raw_post_key = 'abc123'
+                """,
+                ("a" * 64,),
+            )
+            connection.execute(
+                """
+                INSERT INTO post_images (
+                    raw_post_key, position, source_url, local_path, content_type,
+                    content_hash, first_seen_at, last_seen_at
+                ) VALUES (?, 0, ?, ?, 'image/jpeg', ?, ?, ?)
+                """,
+                (
+                    "photo-repost", "https://scontent.example/repost.jpg",
+                    "images/abc123/0-room.jpg", "a" * 64,
+                    "2026-09-18T10:00:00+00:00", "2026-09-18T10:00:00+00:00",
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        results = ListingRepository(self.database, now=self.now).search(ListingSearch())
+
+        self.assertEqual(len(results), 1)
+
         connection = sqlite3.connect(self.database)
         try:
             connection.execute(

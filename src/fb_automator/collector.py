@@ -532,7 +532,8 @@ class FacebookCollector:
                 except Exception:
                     continue
 
-                digest = hashlib.sha256(body).hexdigest()[:16]
+                content_hash = hashlib.sha256(body).hexdigest()
+                digest = content_hash[:16]
                 relative_path = (
                     Path("images")
                     / raw_post_key
@@ -548,6 +549,7 @@ class FacebookCollector:
                     local_path=relative_path.as_posix(),
                     content_type=content_type,
                     observed_at=post.scraped_at,
+                    content_hash=content_hash,
                 )
                 downloaded += 1
         return downloaded

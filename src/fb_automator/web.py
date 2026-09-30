@@ -235,13 +235,25 @@ class ListingRepository:
                     "SELECT 1 FROM sqlite_master "
                     "WHERE type = 'table' AND name = 'post_images'"
                 ).fetchone()
+                image_columns = {
+                    row[1] for row in probe.execute("PRAGMA table_info(post_images)")
+                }
             if has_images:
-                image_expression = """
+                image_hash_expression = (
+                    "pi.content_hash" if "content_hash" in image_columns else "''"
+                )
+                image_expression = f"""
                     (SELECT json_group_array(
-                         json_object('position', ordered.position, 'path', ordered.local_path)
+                         json_object(
+                             'position', ordered.position,
+                             'path', ordered.local_path,
+                             'source', ordered.source_url,
+                             'hash', ordered.content_hash
+                         )
                      )
                      FROM (
-                         SELECT pi.position, pi.local_path
+                         SELECT pi.position, pi.local_path, pi.source_url,
+                                {image_hash_expression} AS content_hash
                          FROM post_images AS pi
                          WHERE pi.raw_post_key = l.raw_post_key
                            AND pi.local_path IS NOT NULL
@@ -259,7 +271,8 @@ class ListingRepository:
                    l.amenities_json, l.particularities_json, l.summary,
                    l.primary_image_position, l.image_quality_score,
                    l.image_review_version,
-                   r.source_city, r.post_url, r.group_name, r.published_label,
+                   r.source_city, r.post_url, r.group_name, r.group_url, r.text,
+                   r.published_label,
                    r.first_seen_at,
                    r.reaction_count, r.comment_count, {image_expression}
             FROM listings AS l
@@ -921,8 +934,9 @@ def _display_currency(
     return source_city.currency
 
 
-def _row_quality(row: sqlite3.Row) -> tuple[int, int, int]:
+def _row_quality(row: sqlite3.Row) -> tuple[int, int, int, int]:
     return (
+        _row_completeness(row),
         row["image_quality_score"] or 0,
         len(_json_image_paths(row["image_paths_json"])),
         (row["reaction_count"] or 0) + 2 * (row["comment_count"] or 0),
@@ -932,21 +946,178 @@ def _row_quality(row: sqlite3.Row) -> tuple[int, int, int]:
 def _rows_are_near_duplicates(left: sqlite3.Row, right: sqlite3.Row) -> bool:
     if left["source_city"] != right["source_city"]:
         return False
-    left_rent = left["monthly_rent"]
-    right_rent = right["monthly_rent"]
-    if (left_rent is None) != (right_rent is None):
+
+    same_group = _normalized_group(left["group_url"]) == _normalized_group(
+        right["group_url"]
+    )
+    contacts_match = bool(_contact_tokens(left["text"]) & _contact_tokens(right["text"]))
+    image_matches = _image_signatures(left["image_paths_json"]) & _image_signatures(
+        right["image_paths_json"]
+    )
+    rent_match, rent_conflict = _numbers_compatible(
+        left["monthly_rent"], right["monthly_rent"], tolerance=2
+    )
+    size_match, size_conflict = _numbers_compatible(
+        left["room_size_m2"] or left["property_size_m2"],
+        right["room_size_m2"] or right["property_size_m2"],
+        tolerance=2,
+    )
+    date_match = bool(
+        left["available_from"]
+        and left["available_from"] == right["available_from"]
+    )
+    location_score = _token_similarity(
+        left["location_text"], right["location_text"], location=True
+    )
+    summary_ratio = SequenceMatcher(
+        None, _normalized_words(left["summary"]), _normalized_words(right["summary"])
+    ).ratio()
+    summary_tokens = _token_similarity(left["summary"], right["summary"])
+
+    if contacts_match and not rent_conflict and not size_conflict and (
+        rent_match
+        or size_match
+        or date_match
+        or location_score >= 0.35
+        or summary_tokens >= 0.30
+    ):
+        return True
+
+    # A shared downloaded photo is the strongest repost signal. Requiring a
+    # second clue avoids merging unrelated listings that use a generic image.
+    if image_matches and (
+        len(image_matches) >= 2
+        or rent_match
+        or size_match
+        or date_match
+        or location_score >= 0.35
+        or summary_tokens >= 0.30
+    ):
+        return True
+
+    # Contradictory structured facts trump merely similar LLM prose.
+    if rent_conflict or size_conflict:
         return False
-    if left_rent is not None and abs(left_rent - right_rent) > 1:
+    left_location_tokens = _location_tokens(left["location_text"])
+    right_location_tokens = _location_tokens(right["location_text"])
+    if (
+        left_location_tokens
+        and right_location_tokens
+        and not left_location_tokens & right_location_tokens
+    ):
         return False
-    left_location = _clean_location(left["location_text"])
-    right_location = _clean_location(right["location_text"])
-    if not left_location or not right_location:
-        return False
-    if left_location.casefold() != right_location.casefold():
-        return False
-    left_summary = " ".join(str(left["summary"]).casefold().split())
-    right_summary = " ".join(str(right["summary"]).casefold().split())
-    return SequenceMatcher(None, left_summary, right_summary).ratio() >= 0.84
+
+    corroborating_facts = sum(
+        (rent_match, size_match, date_match, location_score >= 0.35)
+    )
+    if same_group:
+        return (
+            corroborating_facts >= 2
+            and summary_ratio >= 0.50
+            and summary_tokens >= 0.24
+        ) or (
+            corroborating_facts >= 1
+            and location_score >= 0.60
+            and summary_ratio >= 0.70
+        )
+    return (
+        corroborating_facts >= 2
+        and location_score >= 0.35
+        and summary_ratio >= 0.62
+        and summary_tokens >= 0.30
+    )
+
+
+def _row_completeness(row: sqlite3.Row) -> int:
+    fields = (
+        "monthly_rent", "room_size_m2", "property_size_m2", "location_text",
+        "city", "neighborhood", "available_from", "available_to",
+    )
+    return sum(row[field] not in (None, "") for field in fields) + min(
+        len(str(row["summary"] or "")) // 80, 3
+    )
+
+
+def _normalized_group(value: str | None) -> str:
+    return (value or "").rstrip("/").casefold()
+
+
+def _normalized_words(value: str | None) -> str:
+    return " ".join(re.findall(r"[a-z0-9à-ÿ]+", (value or "").casefold()))
+
+
+def _token_similarity(
+    left: str | None, right: str | None, *, location: bool = False
+) -> float:
+    ignored = {
+        "a", "au", "aux", "de", "des", "du", "en", "et", "la", "le", "les",
+        "un", "une", "dans", "pour", "the", "in", "of", "à", "vd",
+    }
+    if location:
+        ignored |= {
+            "près", "proche", "secteur", "quartier", "lausanne", "amsterdam",
+        }
+    left_tokens = set(_normalized_words(left).split()) - ignored
+    right_tokens = set(_normalized_words(right).split()) - ignored
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
+
+
+def _location_tokens(value: str | None) -> set[str]:
+    ignored = {
+        "a", "au", "aux", "de", "des", "du", "en", "et", "la", "le", "les",
+        "à", "vd", "près", "proche", "secteur", "quartier", "lausanne", "amsterdam",
+    }
+    return set(_normalized_words(value).split()) - ignored
+
+
+def _numbers_compatible(
+    left: float | None, right: float | None, *, tolerance: float
+) -> tuple[bool, bool]:
+    if left is None or right is None:
+        return False, False
+    difference = abs(float(left) - float(right))
+    match = difference <= tolerance
+    conflict = difference > max(tolerance, 0.08 * max(float(left), float(right)))
+    return match, conflict
+
+
+def _contact_tokens(value: str | None) -> set[str]:
+    text = value or ""
+    emails = {item.casefold() for item in re.findall(
+        r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", text
+    )}
+    phones = {
+        digits
+        for candidate in re.findall(r"(?:\+?\d[\d ()\-./]{7,}\d)", text)
+        if 9 <= len(digits := re.sub(r"\D", "", candidate)) <= 15
+    }
+    return emails | phones
+
+
+def _image_signatures(value: str | None) -> set[str]:
+    if not value:
+        return set()
+    try:
+        parsed = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return set()
+    signatures: set[str] = set()
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        digest = item.get("hash")
+        if isinstance(digest, str) and len(digest) >= 16:
+            signatures.add(f"sha256:{digest}")
+            continue
+        source = item.get("source")
+        if isinstance(source, str):
+            parsed_url = urlparse(source)
+            path_parts = [part for part in parsed_url.path.split("/") if part]
+            if len(path_parts) >= 2:
+                signatures.add("facebook:" + "/".join(path_parts[-2:]).casefold())
+    return signatures
 
 
 def _facebook_post_is_recent(

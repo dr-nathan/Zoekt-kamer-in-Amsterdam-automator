@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import hashlib
 from pathlib import Path
 
 from fb_automator.models import RawPost
@@ -7,6 +8,49 @@ from fb_automator.storage import PostStore, dedupe_key
 
 
 class PostStoreTests(unittest.TestCase):
+    def test_existing_image_hashes_are_backfilled_during_migration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "posts.db"
+            with PostStore(database) as store:
+                post = RawPost(
+                    group_name="Housing",
+                    group_url="https://www.facebook.com/groups/123/",
+                    post_id="456",
+                    post_url="https://www.facebook.com/groups/123/posts/456",
+                    text="A room is available",
+                    published_label=None,
+                    scraped_at="2026-09-16T10:00:00+00:00",
+                    source_city="lausanne",
+                )
+                store.upsert([post])
+                key = dedupe_key(post)
+                image_path = Path(directory) / "images" / key / "0-room.jpg"
+                image_path.parent.mkdir(parents=True)
+                image_path.write_bytes(b"same room photo")
+                store.connection.execute(
+                    """
+                    INSERT INTO post_images (
+                        raw_post_key, position, source_url, local_path, content_type,
+                        content_hash, first_seen_at, last_seen_at
+                    ) VALUES (?, 0, ?, ?, 'image/jpeg', '', ?, ?)
+                    """,
+                    (
+                        key,
+                        "https://scontent.example/room.jpg",
+                        f"images/{key}/0-room.jpg",
+                        post.scraped_at,
+                        post.scraped_at,
+                    ),
+                )
+                store.connection.commit()
+
+            with PostStore(database) as migrated:
+                digest = migrated.connection.execute(
+                    "SELECT content_hash FROM post_images"
+                ).fetchone()[0]
+
+            self.assertEqual(digest, hashlib.sha256(b"same room photo").hexdigest())
+
     def test_upsert_deduplicates_post(self) -> None:
         first = RawPost(
             group_name="Housing",

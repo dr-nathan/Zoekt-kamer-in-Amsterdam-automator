@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS post_images (
     source_url TEXT NOT NULL,
     local_path TEXT,
     content_type TEXT,
+    content_hash TEXT NOT NULL DEFAULT '',
     first_seen_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
     PRIMARY KEY (raw_post_key, position),
@@ -241,6 +242,7 @@ class PostStore:
         self.connection.executescript(SCHEMA)
         self._migrate_raw_post_columns()
         self._migrate_listing_columns()
+        self._migrate_image_columns()
         self.connection.execute("PRAGMA optimize")
 
     def _migrate_raw_post_columns(self) -> None:
@@ -312,6 +314,47 @@ class PostStore:
                     self.connection.execute(
                         f"ALTER TABLE listings ADD COLUMN {name} {declaration}"
                     )
+
+    def _migrate_image_columns(self) -> None:
+        existing = {
+            row[1] for row in self.connection.execute("PRAGMA table_info(post_images)")
+        }
+        with self.connection:
+            if "content_hash" not in existing:
+                self.connection.execute(
+                    "ALTER TABLE post_images "
+                    "ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''"
+                )
+
+            rows = self.connection.execute(
+                """
+                SELECT raw_post_key, position, local_path
+                FROM post_images
+                WHERE content_hash = '' AND local_path IS NOT NULL
+                """
+            ).fetchall()
+            updates: list[tuple[str, str, int]] = []
+            for raw_post_key, position, local_path in rows:
+                relative_path = Path(str(local_path))
+                if relative_path.is_absolute() or ".." in relative_path.parts:
+                    continue
+                image_path = self.path.parent / relative_path
+                try:
+                    digest = hashlib.sha256(image_path.read_bytes()).hexdigest()
+                except OSError:
+                    continue
+                updates.append((digest, str(raw_post_key), int(position)))
+            self.connection.executemany(
+                """
+                UPDATE post_images SET content_hash = ?
+                WHERE raw_post_key = ? AND position = ?
+                """,
+                updates,
+            )
+            self.connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_post_images_content_hash "
+                "ON post_images (content_hash) WHERE content_hash != ''"
+            )
 
     def close(self) -> None:
         self.connection.close()
@@ -440,18 +483,23 @@ class PostStore:
         local_path: str,
         content_type: str,
         observed_at: str,
+        content_hash: str = "",
     ) -> None:
         with self.connection:
             self.connection.execute(
                 """
                 INSERT INTO post_images (
-                    raw_post_key, position, source_url, local_path, content_type,
+                    raw_post_key, position, source_url, local_path, content_type, content_hash,
                     first_seen_at, last_seen_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(raw_post_key, position) DO UPDATE SET
                     source_url = excluded.source_url,
                     local_path = excluded.local_path,
                     content_type = excluded.content_type,
+                    content_hash = CASE
+                        WHEN excluded.content_hash != '' THEN excluded.content_hash
+                        ELSE post_images.content_hash
+                    END,
                     last_seen_at = excluded.last_seen_at
                 """,
                 (
@@ -460,6 +508,7 @@ class PostStore:
                     source_url,
                     local_path,
                     content_type,
+                    content_hash,
                     observed_at,
                     observed_at,
                 ),
