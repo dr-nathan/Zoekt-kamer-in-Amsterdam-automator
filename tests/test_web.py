@@ -283,7 +283,7 @@ class ListingRepositoryTests(unittest.TestCase):
                     lease_type, registration, furnishing, gender, age_min, age_max,
                     language_requirement, internationals, applicant_status,
                     private_bathroom, amenities_json, particularities_json,
-                    'Annonce republiée avec une description différente.', evidence_json,
+                    'Chambre lumineuse à Sous-Gare, description republiée.', evidence_json,
                     'photo-repost-hash', extraction_version, extracted_at
                 FROM listings WHERE raw_post_key = 'abc123'
                 """,
@@ -294,6 +294,10 @@ class ListingRepositoryTests(unittest.TestCase):
                 UPDATE post_images SET content_hash = ? WHERE raw_post_key = 'abc123'
                 """,
                 ("a" * 64,),
+            )
+            connection.execute(
+                "UPDATE listings SET primary_image_position = 0 "
+                "WHERE raw_post_key IN ('abc123', 'photo-repost')"
             )
             connection.execute(
                 """

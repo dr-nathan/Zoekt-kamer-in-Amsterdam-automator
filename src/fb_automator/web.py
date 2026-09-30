@@ -951,17 +951,27 @@ def _rows_are_near_duplicates(left: sqlite3.Row, right: sqlite3.Row) -> bool:
         right["group_url"]
     )
     contacts_match = bool(_contact_tokens(left["text"]) & _contact_tokens(right["text"]))
-    image_matches = _image_signatures(left["image_paths_json"]) & _image_signatures(
-        right["image_paths_json"]
+    image_matches = _image_signatures(
+        left["image_paths_json"], left["primary_image_position"]
+    ) & _image_signatures(
+        right["image_paths_json"], right["primary_image_position"]
     )
     rent_match, rent_conflict = _numbers_compatible(
         left["monthly_rent"], right["monthly_rent"], tolerance=2
     )
-    size_match, size_conflict = _numbers_compatible(
-        left["room_size_m2"] or left["property_size_m2"],
-        right["room_size_m2"] or right["property_size_m2"],
-        tolerance=2,
-    )
+    if left["room_size_m2"] is not None and right["room_size_m2"] is not None:
+        size_match, size_conflict = _numbers_compatible(
+            left["room_size_m2"], right["room_size_m2"], tolerance=2
+        )
+    elif (
+        left["property_size_m2"] is not None
+        and right["property_size_m2"] is not None
+    ):
+        size_match, size_conflict = _numbers_compatible(
+            left["property_size_m2"], right["property_size_m2"], tolerance=3
+        )
+    else:
+        size_match, size_conflict = False, False
     date_match = bool(
         left["available_from"]
         and left["available_from"] == right["available_from"]
@@ -974,55 +984,48 @@ def _rows_are_near_duplicates(left: sqlite3.Row, right: sqlite3.Row) -> bool:
     ).ratio()
     summary_tokens = _token_similarity(left["summary"], right["summary"])
 
-    if contacts_match and not rent_conflict and not size_conflict and (
-        rent_match
-        or size_match
-        or date_match
-        or location_score >= 0.35
-        or summary_tokens >= 0.30
-    ):
+    left_location_tokens = _location_tokens(left["location_text"])
+    right_location_tokens = _location_tokens(right["location_text"])
+    location_conflict = bool(
+        left_location_tokens
+        and right_location_tokens
+        and not left_location_tokens & right_location_tokens
+    )
+
+    # Contradictory structured facts trump generic photos and similar LLM prose.
+    # Two matching, reviewed room photos may still identify an edited repost.
+    strong_visual_match = len(image_matches) >= 2
+    if size_conflict or location_conflict or (rent_conflict and not strong_visual_match):
+        return False
+
+    supporting_facts = sum(
+        (rent_match, size_match, date_match, location_score >= 0.35)
+    )
+    if contacts_match and supporting_facts >= 2 and summary_tokens >= 0.24:
         return True
 
     # A shared downloaded photo is the strongest repost signal. Requiring a
     # second clue avoids merging unrelated listings that use a generic image.
-    if image_matches and (
-        len(image_matches) >= 2
-        or rent_match
-        or size_match
-        or date_match
-        or location_score >= 0.35
-        or summary_tokens >= 0.30
-    ):
+    if image_matches and supporting_facts >= 2 and summary_tokens >= 0.24:
         return True
 
-    # Contradictory structured facts trump merely similar LLM prose.
-    if rent_conflict or size_conflict:
+    # Without a visual/contact match, a missing rent on only one side is too
+    # ambiguous: Facebook groups contain many generic posts with the same date
+    # and broad neighborhood wording.
+    if (left["monthly_rent"] is None) != (right["monthly_rent"] is None):
         return False
-    left_location_tokens = _location_tokens(left["location_text"])
-    right_location_tokens = _location_tokens(right["location_text"])
-    if (
-        left_location_tokens
-        and right_location_tokens
-        and not left_location_tokens & right_location_tokens
-    ):
-        return False
-
-    corroborating_facts = sum(
-        (rent_match, size_match, date_match, location_score >= 0.35)
-    )
     if same_group:
         return (
-            corroborating_facts >= 2
+            supporting_facts >= 2
             and summary_ratio >= 0.50
             and summary_tokens >= 0.24
         ) or (
-            corroborating_facts >= 1
+            supporting_facts >= 1
             and location_score >= 0.60
             and summary_ratio >= 0.70
         )
     return (
-        corroborating_facts >= 2
-        and location_score >= 0.35
+        supporting_facts >= 2
         and summary_ratio >= 0.62
         and summary_tokens >= 0.30
     )
@@ -1079,7 +1082,7 @@ def _numbers_compatible(
         return False, False
     difference = abs(float(left) - float(right))
     match = difference <= tolerance
-    conflict = difference > max(tolerance, 0.08 * max(float(left), float(right)))
+    conflict = difference > max(tolerance, 0.03 * max(float(left), float(right)))
     return match, conflict
 
 
@@ -1096,8 +1099,10 @@ def _contact_tokens(value: str | None) -> set[str]:
     return emails | phones
 
 
-def _image_signatures(value: str | None) -> set[str]:
-    if not value:
+def _image_signatures(
+    value: str | None, primary_position: int | None
+) -> set[str]:
+    if not value or primary_position is None:
         return set()
     try:
         parsed = json.loads(value)
@@ -1106,6 +1111,8 @@ def _image_signatures(value: str | None) -> set[str]:
     signatures: set[str] = set()
     for item in parsed:
         if not isinstance(item, dict):
+            continue
+        if item.get("position") != primary_position:
             continue
         digest = item.get("hash")
         if isinstance(digest, str) and len(digest) >= 16:
