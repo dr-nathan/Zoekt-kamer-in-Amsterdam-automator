@@ -1,11 +1,11 @@
 # Chineur2000 · collecteur de logements Amsterdam + Lausanne
 
-This experimental branch is rebuilding the original script as a private pipeline:
+Chineur2000 is a private housing-listing pipeline that:
 
-1. Open Facebook in a real, visible Chromium browser.
-2. Reuse a locally saved login session to read configured housing groups.
-3. Store recent posts in a deduplicated SQLite database.
-4. Extract structured housing attributes and expose them in the private Chineur2000 web UI.
+1. Opens Facebook in a real, visible Chromium browser.
+2. Reuses a locally saved login session to read configured housing groups.
+3. Stores recent posts in a deduplicated SQLite database.
+4. Extracts structured housing attributes and exposes them in the private Chineur2000 web UI.
 
 The collector does not store a Facebook password. Browser session data stays under `.state/`,
 which is excluded from Git. The database and collected posts stay under `data/`, also excluded
@@ -179,33 +179,3 @@ session or production database.
 This project is for a single user's private browsing interface. Do not publish session state or
 raw private-group content. The later UI should minimize stored personal data and link back to the
 original Facebook post.
-
-## Legacy Amsterdam prototype
-
-### Description
-The original, superseded goal of this code was as follows:
-
-1. Scrape pre-determined Facebook groups for room listings in Amsterdam (currently, Zoekt Kamer in Amsterdam Community).
-
-2. Filter the rooms on the criteria you set, eg. price, location, size of the room
-
-3. Send the matches to your email, daily. 
-
-### About the code
-This project heavily relies on the already existing Facebook scraper found here : [Facebook-scraper](https://github.com/kevinzg/facebook-scraper).
-
-In the repository also resides a CSV file from the city of Amsterdam, containing all the adresses of Amsterdam. (Freely accessible from https://data.amsterdam.nl ).
-
-### usage
-First, make sure you install the Facebook scraper from Kevin's repo (listed above).
-
-In the repository file, you shoud insert a `cookies.json` file, containing your Facebook cookies, in JSON format. See Kevin's page for more info
-
-Set your criteria : locations of interest, (the easiest is to insert a list of postcodes), max price you are willing to pay, minimum room size, and Scrape away.
-
-(Send to email function not implemented yet)
-
-You should also probably have git LFS installed, as the large CSV file makes use of LFS (https://git-lfs.github.com/).
-
-### Disclaimer
-This is a non-serious project and is in a very imperfect state. Feel free to clone, fork, create pull requests.
