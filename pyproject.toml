@@ -32,4 +32,5 @@ fb_automator = [
     "web_assets/templates/*.html",
     "web_assets/static/*.css",
     "web_assets/static/*.js",
+    "web_assets/static/cities/*.jpg",
 ]

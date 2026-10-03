@@ -369,7 +369,7 @@ class ListingRepositoryTests(unittest.TestCase):
 
             bern = client.get("/ville/bern")
             self.assertEqual(bern.status_code, 200)
-            self.assertIn("Bern", bern.text)
+            self.assertIn("Berne", bern.text)
             self.assertIn("CHF", bern.text)
             self.assertNotIn("CHF 850 / mois", bern.text)
 

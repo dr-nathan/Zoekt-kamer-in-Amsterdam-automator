@@ -219,6 +219,33 @@ CREATE TABLE IF NOT EXISTS admin_events (
 );
 CREATE INDEX IF NOT EXISTS idx_admin_events_created
     ON admin_events (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS visitor_geo (
+    ip_address TEXT PRIMARY KEY,
+    city TEXT NOT NULL DEFAULT '',
+    region TEXT NOT NULL DEFAULT '',
+    country TEXT NOT NULL DEFAULT '',
+    country_code TEXT NOT NULL DEFAULT '',
+    provider TEXT NOT NULL DEFAULT '',
+    looked_up_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS page_views (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    visited_at TEXT NOT NULL,
+    ip_address TEXT NOT NULL,
+    path TEXT NOT NULL,
+    referrer TEXT NOT NULL DEFAULT '',
+    user_agent TEXT NOT NULL DEFAULT '',
+    city TEXT NOT NULL DEFAULT '',
+    region TEXT NOT NULL DEFAULT '',
+    country TEXT NOT NULL DEFAULT '',
+    country_code TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_page_views_visited
+    ON page_views (visited_at DESC);
+CREATE INDEX IF NOT EXISTS idx_page_views_ip_visited
+    ON page_views (ip_address, visited_at DESC);
 """
 
 

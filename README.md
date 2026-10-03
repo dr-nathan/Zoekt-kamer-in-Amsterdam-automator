@@ -137,7 +137,8 @@ The production layout keeps deployable code separate from private runtime state:
 - `/home/nathan/facebookrooms-data`: SQLite database and downloaded listing photos.
 - `facebookrooms.service`: web application on localhost port 8000.
 - Caddy: HTTPS, password protection and reverse proxy for `facebookrooms.nl`.
-- `facebookrooms-collect.timer`: optional randomized refresh every 30–40 minutes. Enable this only
+- `facebookrooms-collect.timer`: optional randomized refresh every two hours, with up to 20 minutes
+  of jitter. Enable this only
   after a Facebook session and `OPENAI_API_KEY` have been installed on the VPS.
 - `facebookrooms-digest.timer`: personalized digests at 09:00 in the `Europe/Amsterdam` timezone.
 
@@ -168,14 +169,19 @@ The `/admin` dashboard has its own Caddy password and is additionally inaccessib
 do not pass through the protected Caddy admin route.
 
 The dashboard shows masked recipients, saved-search counts, provider readiness, delivery results,
-collection/extraction job history, listing counts, and free disk space. It never displays raw private
-Facebook post text or provider secrets.
+collection/extraction job history, listing counts, free disk space, and public-page traffic. Traffic
+records contain the timestamp, full client IP, requested page, referrer and a compact browser label.
+Each public IP is geolocated once through `ipwho.is`, then served from the local SQLite cache. Static
+assets, health checks, errors and admin requests are not counted. Visit history is retained without an
+automatic expiry. The dashboard never displays raw private Facebook post text or provider secrets.
 
 Deployment templates are stored in `deploy/`. Never commit the Caddy password hash, `.env`, browser
 session or production database.
 
 ## Privacy boundary
 
-This project is for a single user's private browsing interface. Do not publish session state or
-raw private-group content. The later UI should minimize stored personal data and link back to the
-original Facebook post.
+This project is for a small private browsing interface. Do not publish session state or raw
+private-group content. The traffic dashboard intentionally stores IP addresses indefinitely and sends
+new public IPs to `ipwho.is` for approximate geolocation. If the site is opened to a wider audience,
+add an appropriate privacy notice and revisit retention before inviting visitors. Listing cards link
+back to the original Facebook post.

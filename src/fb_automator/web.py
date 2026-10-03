@@ -21,6 +21,7 @@ from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from starlette.background import BackgroundTasks
 
 from fb_automator.listing_models import (
     AmsterdamNeighborhood,
@@ -40,10 +41,11 @@ from fb_automator.notifications import (
     verify_action,
     verify_csrf,
 )
+from fb_automator.visitor_tracking import client_ip, record_page_view, should_track_visit
 
 DEFAULT_DATABASE = Path("data/listings.db")
 ASSET_ROOT = Path(__file__).parent / "web_assets"
-ASSET_VERSION = "20261003-1"
+ASSET_VERSION = "20261003-2"
 LISTING_MAX_AGE_DAYS = 14
 
 
@@ -70,7 +72,7 @@ CITIES = {
     ),
     "bern": CityConfig(
         slug="bern",
-        name="Bern",
+        name="Berne",
         currency="CHF",
         neighborhoods=tuple(item.value for item in BernNeighborhood),
     ),
@@ -452,7 +454,7 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
 
     application = FastAPI(
         title="Chineur2000",
-        description="Flux privé d’annonces de logement à Amsterdam, Lausanne et Bern.",
+        description="Flux privé d’annonces de logement à Amsterdam, Lausanne et Berne.",
         docs_url=None,
         redoc_url=None,
     )
@@ -464,6 +466,28 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
         StaticFiles(directory=database_path.parent / "images", check_dir=False),
         name="media",
     )
+
+    @application.middleware("http")
+    async def track_public_visits(request: Request, call_next):
+        response = await call_next(request)
+        ip_address = client_ip(request)
+        if ip_address and should_track_visit(request, response.status_code):
+            target = request.url.path
+            if request.url.query:
+                target = f"{target}?{request.url.query}"
+            tasks = BackgroundTasks()
+            if response.background is not None:
+                tasks.tasks.append(response.background)
+            tasks.add_task(
+                record_page_view,
+                database_path,
+                ip_address=ip_address,
+                path=target,
+                referrer=request.headers.get("referer", ""),
+                user_agent=request.headers.get("user-agent", ""),
+            )
+            response.background = tasks
+        return response
 
     @application.get("/", response_class=HTMLResponse)
     def city_picker(request: Request) -> HTMLResponse:
@@ -863,6 +887,7 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
                     "email": notification_settings.email_enabled,
                     "telegram": notification_settings.telegram_enabled,
                 },
+                asset_version=ASSET_VERSION,
                 csrf=csrf_token(notification_settings.app_secret, "admin"),
             )
         )

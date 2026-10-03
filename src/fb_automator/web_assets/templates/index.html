@@ -8,20 +8,21 @@
     <link rel="stylesheet" href="/static/site.css?v={{ asset_version }}">
     <script src="/static/site.js?v={{ asset_version }}" defer></script>
   </head>
-  <body>
+  <body class="city-page city-{{ city.slug }}">
     <header class="site-header">
       <a class="brand" href="/" aria-label="Accueil Chineur2000">
         <span class="brand-mark" aria-hidden="true">C</span>
         <span>Chineur<span>2000</span></span>
       </a>
       <a class="header-meta city-change" href="/">
+        <img class="city-chip-image" src="/static/cities/{{ city.slug }}.jpg?v={{ asset_version }}" alt="" aria-hidden="true">
         <span class="pulse" aria-hidden="true"></span>
         {{ city.name }} · Changer de ville
       </a>
     </header>
 
     <main>
-      <section class="intro shell">
+      <section class="intro city-hero shell">
         <div>
           <p class="eyebrow">Les groupes de {{ city.name }}, enfin triés</p>
           <h1>Chineur de pur chambres et apparts Facebook 💯</h1>

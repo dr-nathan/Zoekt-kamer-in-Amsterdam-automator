@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from fb_automator.storage import SCHEMA
+from fb_automator.visitor_tracking import browser_label
 
 
 AMSTERDAM_TIMEZONE = "Europe/Amsterdam"
@@ -787,6 +788,38 @@ class NotificationStore:
                 """
             )
         }
+        visit_cutoff = (utc_now() - timedelta(hours=24)).isoformat()
+        visit_metrics = dict(
+            self.connection.execute(
+                """
+                SELECT
+                    COUNT(*) AS total_views,
+                    COUNT(DISTINCT ip_address) AS unique_visitors,
+                    SUM(CASE WHEN visited_at >= ? THEN 1 ELSE 0 END) AS views_24h
+                FROM page_views
+                """,
+                (visit_cutoff,),
+            ).fetchone()
+        )
+        recent_visits = []
+        for row in self.connection.execute(
+            """
+            SELECT visited_at, ip_address, path, referrer, user_agent,
+                   city, region, country, country_code
+            FROM page_views
+            ORDER BY visited_at DESC
+            LIMIT 100
+            """
+        ):
+            visit = dict(row)
+            visit["location"] = ", ".join(
+                dict.fromkeys(
+                    value for value in (row["city"], row["region"], row["country"])
+                    if value
+                )
+            ) or "Localisation en attente"
+            visit["browser"] = browser_label(str(row["user_agent"] or ""))
+            recent_visits.append(visit)
         return {
             "channel_counts": channel_counts,
             "channels": channels,
@@ -794,6 +827,8 @@ class NotificationStore:
             "jobs": jobs,
             "digests": digests,
             "listing_stats": listing_stats,
+            "visit_metrics": visit_metrics,
+            "recent_visits": recent_visits,
         }
 
     def _record_event(
