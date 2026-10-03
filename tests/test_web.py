@@ -355,6 +355,7 @@ class ListingRepositoryTests(unittest.TestCase):
             self.assertEqual(picker.status_code, 200)
             self.assertIn('/ville/amsterdam', picker.text)
             self.assertIn('/ville/lausanne', picker.text)
+            self.assertIn('/ville/bern', picker.text)
             self.assertIn("1 annonce récente", picker.text)
 
             lausanne = client.get("/ville/lausanne")
@@ -365,6 +366,12 @@ class ListingRepositoryTests(unittest.TestCase):
             self.assertEqual(amsterdam.status_code, 200)
             self.assertIn("EUR", amsterdam.text)
             self.assertNotIn("CHF 850 / mois", amsterdam.text)
+
+            bern = client.get("/ville/bern")
+            self.assertEqual(bern.status_code, 200)
+            self.assertIn("Bern", bern.text)
+            self.assertIn("CHF", bern.text)
+            self.assertNotIn("CHF 850 / mois", bern.text)
 
     def test_outside_city_uses_specific_municipality_for_display(self) -> None:
         connection = sqlite3.connect(self.database)
@@ -391,6 +398,7 @@ class ListingRepositoryTests(unittest.TestCase):
         repository = ListingRepository(self.database, now=self.now)
         self.assertEqual(len(repository.search(ListingSearch(city="lausanne"))), 1)
         self.assertEqual(repository.search(ListingSearch(city="amsterdam")), [])
+        self.assertEqual(repository.search(ListingSearch(city="bern")), [])
 
         connection = sqlite3.connect(self.database)
         try:

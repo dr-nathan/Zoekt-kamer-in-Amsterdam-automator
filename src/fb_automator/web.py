@@ -22,7 +22,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from fb_automator.listing_models import AmsterdamNeighborhood, LausanneNeighborhood
+from fb_automator.listing_models import (
+    AmsterdamNeighborhood,
+    BernNeighborhood,
+    LausanneNeighborhood,
+)
 from fb_automator.notifications import (
     NotificationSettings,
     NotificationStore,
@@ -39,7 +43,7 @@ from fb_automator.notifications import (
 
 DEFAULT_DATABASE = Path("data/listings.db")
 ASSET_ROOT = Path(__file__).parent / "web_assets"
-ASSET_VERSION = "20260925-3"
+ASSET_VERSION = "20261003-1"
 LISTING_MAX_AGE_DAYS = 14
 
 
@@ -64,6 +68,12 @@ CITIES = {
         currency="CHF",
         neighborhoods=tuple(item.value for item in LausanneNeighborhood),
     ),
+    "bern": CityConfig(
+        slug="bern",
+        name="Bern",
+        currency="CHF",
+        neighborhoods=tuple(item.value for item in BernNeighborhood),
+    ),
 }
 
 UNKNOWN_LOCATION_VALUES = {
@@ -73,6 +83,9 @@ UNKNOWN_LOCATION_VALUES = {
     "lieu inconnu",
     "non précisé",
     "not specified",
+    "unbekannt",
+    "ort unbekannt",
+    "nicht angegeben",
 }
 
 
@@ -439,7 +452,7 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
 
     application = FastAPI(
         title="Chineur2000",
-        description="Flux privé d’annonces de logement à Amsterdam et Lausanne.",
+        description="Flux privé d’annonces de logement à Amsterdam, Lausanne et Bern.",
         docs_url=None,
         redoc_url=None,
     )
@@ -1058,7 +1071,7 @@ def _token_similarity(
     }
     if location:
         ignored |= {
-            "près", "proche", "secteur", "quartier", "lausanne", "amsterdam",
+            "près", "proche", "secteur", "quartier", "lausanne", "amsterdam", "bern",
         }
     left_tokens = set(_normalized_words(left).split()) - ignored
     right_tokens = set(_normalized_words(right).split()) - ignored
@@ -1070,7 +1083,7 @@ def _token_similarity(
 def _location_tokens(value: str | None) -> set[str]:
     ignored = {
         "a", "au", "aux", "de", "des", "du", "en", "et", "la", "le", "les",
-        "à", "vd", "près", "proche", "secteur", "quartier", "lausanne", "amsterdam",
+        "à", "vd", "près", "proche", "secteur", "quartier", "lausanne", "amsterdam", "bern",
     }
     return set(_normalized_words(value).split()) - ignored
 

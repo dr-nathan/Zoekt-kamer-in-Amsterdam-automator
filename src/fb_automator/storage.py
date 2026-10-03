@@ -275,6 +275,7 @@ class PostStore:
                 SET source_city = CASE
                     WHEN lower(group_name) LIKE '%amsterdam%' THEN 'amsterdam'
                     WHEN lower(group_name) LIKE '%lausanne%' THEN 'lausanne'
+                    WHEN lower(group_name) LIKE '%bern%' THEN 'bern'
                     ELSE source_city
                 END
                 WHERE source_city = ''

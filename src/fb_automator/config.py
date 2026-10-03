@@ -36,9 +36,9 @@ def load_groups(path: Path) -> list[GroupSource]:
             "www.facebook.com",
         } or not parsed.path.startswith("/groups/"):
             raise ValueError(f"Group entry {index} is not a Facebook group URL: {url}")
-        if city not in {"amsterdam", "lausanne"}:
+        if city not in {"amsterdam", "lausanne", "bern"}:
             raise ValueError(
-                f"Group entry {index} must use city 'amsterdam' or 'lausanne'."
+                f"Group entry {index} must use city 'amsterdam', 'lausanne', or 'bern'."
             )
         groups.append(GroupSource(name=name, url=url, city=city))
     return groups

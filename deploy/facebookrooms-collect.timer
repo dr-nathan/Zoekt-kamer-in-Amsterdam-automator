@@ -3,8 +3,8 @@ Description=Periodically refresh Facebook room listings
 
 [Timer]
 OnBootSec=10min
-OnCalendar=*-*-* *:00,30:00
-RandomizedDelaySec=10min
+OnCalendar=*-*-* 00/2:00:00
+RandomizedDelaySec=20min
 Persistent=true
 
 [Install]

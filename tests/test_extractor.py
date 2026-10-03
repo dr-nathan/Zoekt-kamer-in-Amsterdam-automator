@@ -8,6 +8,7 @@ from fb_automator.extractor import LLMListingExtractor, extract_database
 from fb_automator.listing_models import (
     ApplicantStatus,
     AttributeEvidence,
+    BernNeighborhood,
     EvidenceField,
     EvidenceStrength,
     Currency,
@@ -80,6 +81,22 @@ class FakeClient:
 
 
 class ExtractorTests(unittest.TestCase):
+    def test_schema_accepts_bern_neighborhood(self) -> None:
+        result = model_result().model_copy(
+            update={
+                "location_text": "Breitenrain, Bern",
+                "city": "Bern",
+                "neighborhood": BernNeighborhood.BREITENRAIN_LORRAINE,
+            }
+        )
+
+        normalized = ExtractedListing.model_validate(result.model_dump())
+
+        self.assertEqual(
+            normalized.neighborhood,
+            BernNeighborhood.BREITENRAIN_LORRAINE,
+        )
+
     def test_overlong_model_summary_is_clipped_instead_of_aborting(self) -> None:
         result = model_result().model_copy(
             update={"summary": " ".join(f"mot{i}" for i in range(50))}
@@ -119,6 +136,7 @@ class ExtractorTests(unittest.TestCase):
                 "Facebook comments, replies, reactions",
             call["input"][0]["content"],
         )
+        self.assertIn("target source city Bern", call["input"][0]["content"])
 
     def test_includes_embedded_listing_card_in_llm_context(self) -> None:
         client = FakeClient()

@@ -102,6 +102,18 @@ class AmsterdamNeighborhood(StrEnum):
     OUTSIDE_AMSTERDAM = "Hors Amsterdam"
 
 
+class BernNeighborhood(StrEnum):
+    """Official city districts used to normalize Bern housing posts."""
+
+    INNERE_STADT = "Innere Stadt"
+    LAENGGASSE_FELSENAU = "Länggasse / Felsenau"
+    MATTENHOF_WEISSENBUEHL = "Mattenhof / Weissenbühl"
+    KIRCHENFELD_SCHOSSHALDE = "Kirchenfeld / Schosshalde"
+    BREITENRAIN_LORRAINE = "Breitenrain / Lorraine"
+    BUEMPLIZ_OBERBOTTIGEN = "Bümpliz / Oberbottigen"
+    OUTSIDE_BERN = "Hors Bern"
+
+
 class InternationalStatus(StrEnum):
     WELCOME = "welcome"
     EXCLUDED = "excluded"
@@ -187,7 +199,7 @@ class ExtractedListing(BaseModel):
         )
     )
     city: str | None
-    neighborhood: LausanneNeighborhood | AmsterdamNeighborhood | None = Field(
+    neighborhood: LausanneNeighborhood | AmsterdamNeighborhood | BernNeighborhood | None = Field(
         description=(
             "Standardized neighborhood for the configured source city, the matching Hors city "
             "label when clearly outside it, or null when it cannot be established."
@@ -245,7 +257,7 @@ class ListingAttributes:
     property_size_m2: float | None
     location_text: str | None
     city: str | None
-    neighborhood: LausanneNeighborhood | AmsterdamNeighborhood | None
+    neighborhood: LausanneNeighborhood | AmsterdamNeighborhood | BernNeighborhood | None
     available_from: str | None
     available_to: str | None
     lease_type: LeaseType

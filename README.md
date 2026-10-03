@@ -1,4 +1,4 @@
-# Chineur2000 · collecteur de logements Amsterdam + Lausanne
+# Chineur2000 · collecteur de logements Amsterdam + Lausanne + Bern
 
 Chineur2000 is a private housing-listing pipeline that:
 
@@ -25,7 +25,7 @@ Create the private group configuration:
 cp config/groups.example.json config/groups.json
 ```
 
-Edit `config/groups.json` and add each group name, URL, and its `amsterdam` or `lausanne`
+Edit `config/groups.json` and add each group name, URL, and its `amsterdam`, `lausanne`, or `bern`
 city identifier. This file is intentionally ignored.
 
 ## First login
@@ -80,7 +80,7 @@ The extractor sends each pending post to the OpenAI Responses API with Structure
 writes the validated result to the normalized `listings` table. It extracts monthly rent and currency, size, location,
 availability, registration, contract, furnishing, applicant requirements, amenities, a short
 French summary, and concise French Particularities labels. Locations are normalized by the model
-to a stable Amsterdam or Lausanne neighborhood set. Every material field keeps a supporting quote and
+to a stable Amsterdam, Lausanne, or Bern neighborhood set. Every material field keeps a supporting quote and
 confidence score. Raw captured posts remain unchanged.
 
 The default model is `gpt-5.4-mini`. Override it with `OPENAI_MODEL` or `--model`. Results are cached
@@ -114,7 +114,7 @@ Start the private web interface after collecting and extracting posts:
 fb-housing serve
 ```
 
-Open `http://127.0.0.1:8000`. The French interface first asks for Amsterdam or Lausanne, then offers
+Open `http://127.0.0.1:8000`. The French interface first asks for Amsterdam, Lausanne, or Bern, then offers
 city-specific neighborhood and currency filters, maximum rent, minimum room size, registration and
 extracted particularities. Results can be sorted by discovery time, price or Facebook engagement.
 Listings disappear from the website 14 days after first collection without being deleted from SQLite.
