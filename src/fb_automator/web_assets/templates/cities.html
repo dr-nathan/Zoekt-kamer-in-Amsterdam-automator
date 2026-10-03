@@ -29,8 +29,7 @@
       <div class="city-options" aria-label="Choisir une ville">
         {% for city in cities %}
           <a class="city-option city-option-{{ city.slug }}" href="/ville/{{ city.slug }}">
-            <img class="city-option-image" src="/static/cities/{{ city.slug }}.jpg?v={{ asset_version }}" alt="" aria-hidden="true" decoding="async">
-            <span class="city-option-shade" aria-hidden="true"></span>
+            <img class="city-option-image" src="/static/cities/{{ city.slug }}-icon.png?v={{ asset_version }}" alt="" aria-hidden="true" decoding="async">
             <span class="city-number">0{{ loop.index }}</span>
             <span class="city-name">{{ city.name }}</span>
             <span class="city-count">

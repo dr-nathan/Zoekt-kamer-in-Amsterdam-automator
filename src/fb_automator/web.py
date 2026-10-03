@@ -45,7 +45,7 @@ from fb_automator.visitor_tracking import client_ip, record_page_view, should_tr
 
 DEFAULT_DATABASE = Path("data/listings.db")
 ASSET_ROOT = Path(__file__).parent / "web_assets"
-ASSET_VERSION = "20261003-2"
+ASSET_VERSION = "20261003-3"
 LISTING_MAX_AGE_DAYS = 14
 
 
