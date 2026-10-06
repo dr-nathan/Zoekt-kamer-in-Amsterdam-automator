@@ -1,187 +1,141 @@
-# Chineur2000 · collecteur de logements Amsterdam + Lausanne + Bern
+# Chineur2000
 
-Chineur2000 is a private housing-listing pipeline that:
+<p align="center">
+  <img src="src/fb_automator/web_assets/static/cities/amsterdam-icon.png" alt="Amsterdam" width="150">
+  <img src="src/fb_automator/web_assets/static/cities/lausanne-icon.png" alt="Lausanne" width="150">
+  <img src="src/fb_automator/web_assets/static/cities/bern-icon.png" alt="Bern" width="150">
+</p>
 
-1. Opens Facebook in a real, visible Chromium browser.
-2. Reuses a locally saved login session to read configured housing groups.
-3. Stores recent posts in a deduplicated SQLite database.
-4. Extracts structured housing attributes and exposes them in the private Chineur2000 web UI.
+**A searchable housing feed built from the places where the best listings often appear first: local Facebook groups.**
 
-The collector does not store a Facebook password. Browser session data stays under `.state/`,
-which is excluded from Git. The database and collected posts stay under `data/`, also excluded
-from Git.
+Housing groups contain great rooms and apartments, but discovery is fragmented and the posts are
+unstructured. Chineur2000 collects recent listings, turns their free-form text into consistent data,
+removes duplicates and presents everything in a simple city-based website.
 
-## Setup
+The current feed covers **Amsterdam, Lausanne and Bern**.
 
-```bash
-conda activate fb
-python -m pip install -e .
-python -m playwright install chromium
+## What it does
+
+- Collects recent housing posts from configured Facebook groups with Playwright.
+- Extracts rent, size, location, availability, registration rules, furnishing, amenities and other
+  useful attributes with structured LLM output.
+- Normalizes locations into city-specific neighborhoods while retaining nearby municipalities.
+- Detects exact copies, cross-posts and similar reposts across groups.
+- Saves listing images locally and selects the most useful cover image.
+- Tracks reactions and comments so listings can be ranked by activity.
+- Offers city, neighborhood, price, size and particularity filters in a responsive French interface.
+- Automatically removes listings older than two weeks from the visible feed.
+- Sends personalized daily e-mail or Telegram digests for saved searches.
+- Caches text extraction and image review results so unchanged posts do not consume additional API
+  calls.
+
+## How it works
+
+```text
+Facebook housing groups
+          │
+          ▼
+ Playwright collector ──────► SQLite + local images
+          │                         │
+          ▼                         ▼
+ Structured LLM extraction ─► deduplication and ranking
+                                    │
+                                    ▼
+                         FastAPI/Jinja web interface
+                                    │
+                                    ├──► searchable city feeds
+                                    └──► e-mail and Telegram alerts
 ```
 
-Create the private group configuration:
+Raw posts and extracted listings live in the same SQLite database as separate layers. The original
+capture remains available for reprocessing, while normalized listing records power the filters and
+alerts. Extraction and image review are content-addressed, making repeated collection economical.
+
+## Product highlights
+
+### Multi-city discovery
+
+Each city has its own groups, currency and neighborhood vocabulary. The landing page opens into a
+dedicated Amsterdam, Lausanne or Bern feed with filters tailored to that location.
+
+### LLM-native extraction
+
+Housing posts vary widely in language and format. Instead of relying on a growing collection of
+regular expressions, Chineur2000 uses validated structured output to interpret Dutch, French,
+German and English listings consistently.
+
+### Fresh, deduplicated results
+
+The collector keeps engagement counts current, combines reposts and limits the website to recent
+offers. The source Facebook link remains attached to every listing for the definitive context.
+
+### Personalized alerts
+
+Saved searches support multiple neighborhoods and particularities. Subscribers receive one concise
+daily digest only when new matching listings are available, with self-service management and
+unsubscribe links.
+
+## Technology
+
+- **Python** for collection, extraction and application logic
+- **Playwright** for browser-based Facebook collection
+- **OpenAI Responses API** with Pydantic structured outputs
+- **FastAPI + Jinja** for the server-rendered website
+- **SQLite** for raw posts, normalized listings, subscriptions and operational data
+- **Resend + Telegram Bot API** for daily notifications
+- **Caddy + systemd** for the self-hosted production deployment
+
+## Run locally
+
+Requirements: Python 3.11+ and a Chromium-compatible Playwright installation.
 
 ```bash
+python -m pip install -e .
+python -m playwright install chromium
 cp config/groups.example.json config/groups.json
 ```
 
-Edit `config/groups.json` and add each group name, URL, and its `amsterdam`, `lausanne`, or `bern`
-city identifier. This file is intentionally ignored.
-
-## First login
+Authenticate Facebook interactively, collect a small sample, extract its attributes and start the
+website:
 
 ```bash
 fb-housing login
-```
-
-A browser opens. Sign in manually, wait for the Facebook home feed, then return to the terminal
-and press Enter. Never commit `.state/` or share it: the saved browser state can access the
-Facebook account.
-
-To move the authenticated session to a private server without copying the entire browser profile:
-
-```bash
-fb-housing export-session
-```
-
-This creates `.state/facebook-profile/storage-state.json`. It contains active Facebook cookies and
-must be transferred only over SSH, kept mode `0600`, and never committed. The collector imports it
-into the destination browser profile and refreshes it after successful collections.
-
-## Collect a small sample
-
-```bash
 fb-housing collect --max-posts 50
-```
-
-The collector stays visible by default so failures are understandable. Results are stored in
-`data/listings.db`. Start with one group and a small post limit; Facebook can restrict accounts
-or IP addresses when it detects automated collection. The collector enforces a minimum two-second
-scroll pause, backs off when scrolling produces no new posts, and stops if Facebook displays a
-login checkpoint or temporary-block warning.
-
-Each collection also captures the visible reaction and comment counts. `raw_posts` keeps the latest
-known counts, while `engagement_snapshots` keeps dated observations so popularity can be graphed or
-ranked later. Missing Facebook UI counters are stored as unknown rather than assumed to be zero.
-
-Up to three listing photos per post are downloaded into `data/images/`. SQLite keeps their source
-URL, ordering and local path in `post_images`; the image bytes are deliberately kept out of the
-database. The private website serves these local copies, so its visitors do not depend on expiring
-Facebook CDN URLs or make direct image requests to Facebook.
-
-## Extract filterable listings
-
-```bash
-export OPENAI_API_KEY="your-api-key"
 fb-housing extract
+fb-housing serve
 ```
 
-The extractor sends each pending post to the OpenAI Responses API with Structured Outputs and
-writes the validated result to the normalized `listings` table. It extracts monthly rent and currency, size, location,
-availability, registration, contract, furnishing, applicant requirements, amenities, a short
-French summary, and concise French Particularities labels. Locations are normalized by the model
-to a stable Amsterdam, Lausanne, or Bern neighborhood set. Every material field keeps a supporting quote and
-confidence score. Raw captured posts remain unchanged.
+The interface is then available at `http://127.0.0.1:8000`. Runtime configuration and optional
+provider settings are documented in [`.env.example`](.env.example), while the group format is shown
+in [`config/groups.example.json`](config/groups.example.json).
 
-The default model is `gpt-5.4-mini`. Override it with `OPENAI_MODEL` or `--model`. Results are cached
-by the post text, extraction version, and model, so unchanged posts do not incur another API call.
-Use `--force` to deliberately rebuild them or `--limit 5` for a small trial. Extraction uses four
-concurrent API requests by default; adjust this with `--workers` if needed.
-Re-collecting a post only refreshes its timestamps and engagement counts; it does not invalidate the
-LLM result unless the post text changes. A stable prompt-cache key also lets eligible API requests
-reuse the common extraction instructions.
-
-After extraction, the same command reviews saved photos with `gpt-5.4-mini` at low image detail and
-chooses a useful housing photo instead of a portrait, screenshot or unrelated image. Image reviews
-are cached by the image bytes and model. Override the model with `OPENAI_VISION_MODEL` or
-`--vision-model`, or use `--skip-image-review` when only text extraction is wanted.
-
-Private-group post text is sent to the configured OpenAI API project during extraction. API
-response storage is disabled (`store=False`), but do not run extraction if that data transfer is
-incompatible with your privacy requirements.
-
-Run the unit tests with:
+Run the test suite with:
 
 ```bash
 python -m unittest discover -s tests
 ```
 
-## Browse the listings
+## Project structure
 
-Start the private web interface after collecting and extracting posts:
+```text
+src/fb_automator/
+├── collector.py          Facebook collection and scrolling
+├── extractor.py          Structured listing extraction
+├── image_reviewer.py     Listing-cover selection
+├── storage.py            SQLite schema and persistence
+├── notifications.py      Saved searches and daily digests
+├── visitor_tracking.py   Lightweight site analytics
+├── web.py                FastAPI application
+└── web_assets/           Templates, styles and city artwork
 
-```bash
-fb-housing serve
+config/                   Example group configuration
+deploy/                   Self-hosting templates
+tests/                    Unit and browser-assisted tests
 ```
 
-Open `http://127.0.0.1:8000`. The French interface first asks for Amsterdam, Lausanne, or Bern, then offers
-city-specific neighborhood and currency filters, maximum rent, minimum room size, registration and
-extracted particularities. Results can be sorted by discovery time, price or Facebook engagement.
-Listings disappear from the website 14 days after first collection without being deleted from SQLite.
-The website never shows raw post text and links back to Facebook for the original context.
+## Status
 
-Override the defaults when needed:
-
-```bash
-fb-housing serve --database /path/to/listings.db --host 0.0.0.0 --port 8000
-```
-
-Do not expose the app publicly before adding access control; private-group summaries are still
-private information.
-
-## VPS layout
-
-The production layout keeps deployable code separate from private runtime state:
-
-- `/home/nathan/facebookrooms`: Git checkout, virtual environment and private `.env` file.
-- `/home/nathan/facebookrooms-data`: SQLite database and downloaded listing photos.
-- `facebookrooms.service`: web application on localhost port 8000.
-- Caddy: HTTPS, password protection and reverse proxy for `facebookrooms.nl`.
-- `facebookrooms-collect.timer`: optional randomized refresh every two hours, with up to 20 minutes
-  of jitter. Enable this only
-  after a Facebook session and `OPENAI_API_KEY` have been installed on the VPS.
-- `facebookrooms-digest.timer`: personalized digests at 09:00 in the `Europe/Amsterdam` timezone.
-
-## Daily e-mail and Telegram alerts
-
-The current result filters can be saved from a city page. E-mail subscriptions use double opt-in;
-Telegram subscriptions open a bot deep link and become active only after the user presses Start.
-Each verified destination receives at most one combined message per day and never receives the same
-listing twice in the same digest. Days without new matching listings stay quiet.
-
-Configure providers interactively on the VPS:
-
-```bash
-cd /home/nathan/facebookrooms
-bash deploy/configure-notifications.sh
-```
-
-The script asks for a separate administrator password, optional Resend credentials, and optional
-Telegram BotFather credentials. It generates the application and Telegram webhook secrets, updates
-the private `.env`, installs the 09:00 timer, configures the Telegram webhook when possible, and
-reloads Caddy. It can safely be rerun to add a provider later without rotating existing application
-or webhook secrets. For e-mail, verify `facebookrooms.nl` (or a sending subdomain) in Resend and register
-`https://facebookrooms.nl/webhooks/resend` as the webhook endpoint.
-
-Subscription verification, management, unsubscribe, and provider webhook routes bypass the shared
-website password because they carry signed, single-purpose tokens or verified webhook secrets.
-The `/admin` dashboard has its own Caddy password and is additionally inaccessible to requests that
-do not pass through the protected Caddy admin route.
-
-The dashboard shows masked recipients, saved-search counts, provider readiness, delivery results,
-collection/extraction job history, listing counts, free disk space, and public-page traffic. Traffic
-records contain the timestamp, full client IP, requested page, referrer and a compact browser label.
-Each public IP is geolocated once through `ipwho.is`, then served from the local SQLite cache. Static
-assets, health checks, errors and admin requests are not counted. Visit history is retained without an
-automatic expiry. The dashboard never displays raw private Facebook post text or provider secrets.
-
-Deployment templates are stored in `deploy/`. Never commit the Caddy password hash, `.env`, browser
-session or production database.
-
-## Privacy boundary
-
-This project is for a small private browsing interface. Do not publish session state or raw
-private-group content. The traffic dashboard intentionally stores IP addresses indefinitely and sends
-new public IPs to `ipwho.is` for approximate geolocation. If the site is opened to a wider audience,
-add an appropriate privacy notice and revisit retention before inviting visitors. Listing cards link
-back to the original Facebook post.
+Chineur2000 is an actively developed personal project and learning playground for browser
+automation, structured extraction and self-hosted product development. It is not affiliated with or
+endorsed by Facebook or Meta. Anyone adapting the collector should respect group privacy, local law
+and the rules of the platforms they access.
