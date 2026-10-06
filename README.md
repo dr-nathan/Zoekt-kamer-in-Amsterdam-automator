@@ -1,3 +1,7 @@
+<a href="https://gitviewsmap.onrender.com/dr-nathan">
+  <img src="https://gitviewsmap.onrender.com/badge/dr-nathan.svg" alt="GitViewsMap Visitor Badge" />
+</a>
+
 # Chineur2000
 
 <p align="center">
@@ -140,6 +144,4 @@ automation, structured extraction and self-hosted product development. It is not
 endorsed by Facebook or Meta. Anyone adapting the collector should respect group privacy, local law
 and the rules of the platforms they access.
 
-<a href="https://gitviewsmap.onrender.com/dr-nathan">
-  <img src="https://gitviewsmap.onrender.com/badge/dr-nathan.svg" alt="GitViewsMap Visitor Badge" />
-</a>
+
