@@ -41,10 +41,10 @@ stop_all() {
     stop_pid "$STATE_DIR/websockify.pid"
     stop_pid "$STATE_DIR/x11vnc.pid"
     stop_pid "$STATE_DIR/xvfb.pid"
-    pkill -u "$(id -u)" -f "^/usr/bin/python3 /usr/bin/websockify .*127[.]0[.]0[.]1:$NOVNC_PORT " \
+    pkill -KILL -u "$(id -u)" -f "^/usr/bin/python3 /usr/bin/websockify .*127[.]0[.]0[.]1:$NOVNC_PORT " \
         2>/dev/null || true
-    pkill -u "$(id -u)" -f "^x11vnc -display $DISPLAY_NUMBER " 2>/dev/null || true
-    pkill -u "$(id -u)" -f "^Xvfb $DISPLAY_NUMBER " 2>/dev/null || true
+    pkill -KILL -u "$(id -u)" -f "^x11vnc -display $DISPLAY_NUMBER " 2>/dev/null || true
+    pkill -KILL -u "$(id -u)" -f "^Xvfb $DISPLAY_NUMBER " 2>/dev/null || true
     sleep 0.5
     rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
     rm -f "$STATE_DIR/login-input"
