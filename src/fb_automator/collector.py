@@ -192,6 +192,7 @@ class FacebookCollector:
             context = playwright.chromium.launch_persistent_context(
                 str(self.profile_dir), headless=True, viewport={"width": 1440, "height": 1000}
             )
+            self._restore_session(context)
             page = context.pages[0] if context.pages else context.new_page()
             page.goto("https://www.facebook.com/", wait_until="domcontentloaded")
             self._guard_access(page)
@@ -238,6 +239,22 @@ class FacebookCollector:
             cookies = payload.get("cookies", [])
             if cookies:
                 context.add_cookies(cookies)
+            origins = {
+                str(origin.get("origin")): origin.get("localStorage", [])
+                for origin in payload.get("origins", [])
+                if isinstance(origin, dict) and origin.get("origin")
+            }
+            if origins:
+                context.add_init_script(
+                    script=(
+                        "(() => {"
+                        f"const origins = {json.dumps(origins)};"
+                        "for (const item of origins[window.location.origin] || []) {"
+                        "window.localStorage.setItem(item.name, item.value);"
+                        "}"
+                        "})();"
+                    )
+                )
         except (json.JSONDecodeError, OSError, TypeError, ValueError) as exc:
             raise RuntimeError(
                 f"Could not load transferable Facebook session: {self.session_file}"

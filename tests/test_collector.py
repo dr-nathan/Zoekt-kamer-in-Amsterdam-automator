@@ -1,4 +1,8 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from playwright.sync_api import sync_playwright
 
@@ -99,6 +103,63 @@ class PostUrlTests(unittest.TestCase):
         self.assertEqual(len(posts), 1)
         self.assertNotIn("CHF1,300", posts[0].text)
         self.assertIn("CHF1,300", posts[0].embedded_listing_text)
+
+
+class SessionTransferTests(unittest.TestCase):
+    def test_restore_session_loads_cookies_and_local_storage(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            profile_dir = Path(directory)
+            (profile_dir / "storage-state.json").write_text(
+                json.dumps(
+                    {
+                        "cookies": [{"name": "c_user", "value": "123"}],
+                        "origins": [
+                            {
+                                "origin": "https://www.facebook.com",
+                                "localStorage": [{"name": "locale", "value": "fr_FR"}],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            collector = FacebookCollector(profile_dir, profile_dir / "listings.db")
+            context = MagicMock()
+
+            collector._restore_session(context)
+
+            context.add_cookies.assert_called_once_with(
+                [{"name": "c_user", "value": "123"}]
+            )
+            init_script = context.add_init_script.call_args.kwargs["script"]
+            self.assertIn("https://www.facebook.com", init_script)
+            self.assertIn("localStorage.setItem", init_script)
+
+    def test_export_session_restores_transferable_state_before_navigation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            profile_dir = Path(directory)
+            session_file = profile_dir / "storage-state.json"
+            session_file.write_text('{"cookies": []}', encoding="utf-8")
+            collector = FacebookCollector(profile_dir, profile_dir / "listings.db")
+            context = MagicMock()
+            page = MagicMock()
+            context.pages = [page]
+            playwright = MagicMock()
+            playwright.chromium.launch_persistent_context.return_value = context
+            manager = MagicMock()
+            manager.__enter__.return_value = playwright
+
+            with (
+                patch("fb_automator.collector.sync_playwright", return_value=manager),
+                patch.object(collector, "_restore_session") as restore_session,
+                patch.object(collector, "_guard_access"),
+            ):
+                collector.export_session()
+
+            restore_session.assert_called_once_with(context)
+            page.goto.assert_called_once_with(
+                "https://www.facebook.com/", wait_until="domcontentloaded"
+            )
 
 
 if __name__ == "__main__":
