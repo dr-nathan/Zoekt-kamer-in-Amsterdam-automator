@@ -18,16 +18,35 @@ pid_is_running() {
 stop_pid() {
     local file=$1
     if pid_is_running "$file"; then
-        kill "$(cat "$file")" 2>/dev/null || true
+        local pid
+        pid=$(cat "$file")
+        kill "$pid" 2>/dev/null || true
+        for _ in {1..30}; do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 0.1
+        done
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -KILL "$pid" 2>/dev/null || true
+        fi
     fi
     rm -f "$file"
 }
 
 stop_all() {
     screen -S "$SCREEN_NAME" -X quit >/dev/null 2>&1 || true
+    for _ in {1..30}; do
+        screen -list | grep -q "[.]$SCREEN_NAME" || break
+        sleep 0.1
+    done
     stop_pid "$STATE_DIR/websockify.pid"
     stop_pid "$STATE_DIR/x11vnc.pid"
     stop_pid "$STATE_DIR/xvfb.pid"
+    pkill -u "$(id -u)" -f "^/usr/bin/python3 /usr/bin/websockify .*127[.]0[.]0[.]1:$NOVNC_PORT " \
+        2>/dev/null || true
+    pkill -u "$(id -u)" -f "^x11vnc -display $DISPLAY_NUMBER " 2>/dev/null || true
+    pkill -u "$(id -u)" -f "^Xvfb $DISPLAY_NUMBER " 2>/dev/null || true
+    sleep 0.5
+    rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
     rm -f "$STATE_DIR/login-input"
 }
 
@@ -39,10 +58,12 @@ start_all() {
     echo $! > "$STATE_DIR/xvfb.pid"
 
     for _ in {1..50}; do
-        [[ -S /tmp/.X11-unix/X99 ]] && break
+        if pid_is_running "$STATE_DIR/xvfb.pid" && [[ -S /tmp/.X11-unix/X99 ]]; then
+            break
+        fi
         sleep 0.1
     done
-    if [[ ! -S /tmp/.X11-unix/X99 ]]; then
+    if ! pid_is_running "$STATE_DIR/xvfb.pid" || [[ ! -S /tmp/.X11-unix/X99 ]]; then
         echo "Xvfb did not start; see $STATE_DIR/xvfb.log" >&2
         stop_all
         exit 1
