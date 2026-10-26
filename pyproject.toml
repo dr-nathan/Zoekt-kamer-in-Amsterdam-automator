@@ -29,6 +29,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 fb_automator = [
+    "web_assets/*.txt",
     "web_assets/templates/*.html",
     "web_assets/static/*.css",
     "web_assets/static/*.js",

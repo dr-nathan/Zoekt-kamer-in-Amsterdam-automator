@@ -346,8 +346,25 @@ class ListingRepositoryTests(unittest.TestCase):
             for route in create_app(self.database, now=self.now).routes
         }
         self.assertTrue(
-            {"/", "/ville/{city_slug}", "/health", "/static"}.issubset(paths)
+            {
+                "/",
+                "/ville/{city_slug}",
+                "/.well-known/security-verification.txt",
+                "/health",
+                "/static",
+            }.issubset(paths)
         )
+
+    def test_security_verification_publishes_scope_and_token(self) -> None:
+        with TestClient(create_app(self.database, now=self.now)) as client:
+            response = client.get("/.well-known/security-verification.txt")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.headers["content-type"].startswith("text/plain"))
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        self.assertIn("00bcdbcb898dec8cade9af1777c674eac", response.text)
+        self.assertIn("I control facebookrooms.nl", response.text)
+        self.assertIn("Production testing is authorized", response.text)
 
     def test_city_picker_and_city_pages_render(self) -> None:
         with TestClient(create_app(self.database, now=self.now)) as client:

@@ -1,0 +1,90 @@
+FACEBOOKROOMS.NL SECURITY-ASSESSMENT AUTHORIZATION
+
+Verification token:
+00bcdbcb898dec8cade9af1777c674eac464f6b3f1a0386f9767dcdc2dc33f79
+
+I control facebookrooms.nl and authorize a security assessment of this domain
+under the scope and rules below.
+
+Repository:
+https://github.com/dr-nathan/Zoekt-kamer-in-Amsterdam-automator
+
+Authorization period:
+- Starts: 2026-10-26
+- Ends: 2026-11-09 at 23:59 Europe/Zurich
+- Authorization ends earlier if this file is removed from the public website.
+
+In-scope assets:
+- https://facebookrooms.nl
+- https://www.facebookrooms.nl
+- 87.239.129.214, only as the origin serving the domains above
+- The public GitHub repository identified above
+
+Production testing is authorized. Both manual and automated testing are allowed
+when performed in good faith and within the safety rules below.
+
+In-scope testing:
+- Mapping public routes, parameters, static assets, media routes, HTTP methods,
+  response headers, TLS configuration, caching behavior, and CORS behavior.
+- Reviewing the public repository, its history, dependencies, deployment files,
+  configuration examples, and generated artifacts for security weaknesses.
+- Searching for exposed credentials, tokens, private keys, passwords, session
+  material, personal information, internal paths, debug output, and metadata.
+- Testing authentication, authorization, session handling, administrative-route
+  isolation, privilege boundaries, direct-object references, and access-control
+  bypasses. Password guessing, credential stuffing, and use of leaked credentials
+  are not permitted.
+- Testing input handling for injection, cross-site scripting, request forgery,
+  server-side request forgery, path traversal, file inclusion, unsafe redirects,
+  template injection, deserialization issues, and command injection.
+- Testing subscription, confirmation, unsubscribe, filtering, notification, and
+  other business-logic flows using only addresses and accounts controlled by the
+  researcher.
+- Assessing rate-limit behavior with low-volume probes, and checking for accidental
+  exposure of the owner or visitors without collecting more data than necessary.
+- Port and service enumeration of 87.239.129.214. Exploitation of SSH or any service
+  not belonging to facebookrooms.nl is not authorized.
+
+Safety boundaries:
+- Do not perform denial-of-service, stress testing, resource exhaustion, traffic
+  flooding, or tests intended to degrade availability. Automated tools must average
+  no more than 2 requests per second and use no more than 5 concurrent requests.
+- Do not delete, corrupt, encrypt, overwrite, or materially alter production data,
+  files, configuration, logs, subscriptions, or accounts.
+- Use the smallest reversible proof necessary. If a finding could modify data,
+  demonstrate it only with researcher-owned test data and restore it immediately.
+- Do not send email or Telegram messages to third parties. Do not create bulk test
+  subscriptions or cause notification spam.
+- Do not access, download, retain, or disclose private Facebook post content,
+  subscriber information, visitor records, or other personal data beyond the
+  minimum evidence required to establish a vulnerability. Stop once access is
+  demonstrated.
+- Do not execute remote commands beyond a minimal harmless proof such as `id`.
+  Do not establish persistence, upload tools, install software, pivot, access other
+  hosts, or explore unrelated files.
+- Do not use, validate against third-party services, or display any discovered
+  secret. Record only its type and location with the value redacted, then report it
+  so it can be rotated.
+- No social engineering, phishing, impersonation, physical testing, credential
+  stuffing, password spraying, or brute-force authentication.
+- Do not modify DNS, the GitHub repository, hosting-provider settings, Facebook,
+  OpenAI, Resend, Telegram, NovaCloud, or any other third-party system.
+- Facebook groups, Facebook accounts, OpenAI, Resend, Telegram, GitHub itself,
+  NovaCloud infrastructure outside this VPS, and all other third-party assets are
+  explicitly out of scope.
+
+Data handling and reporting:
+- Minimize all collected data, store evidence securely, and delete it after the
+  report is accepted or within 7 days, whichever occurs first.
+- Redact secrets, session identifiers, private post text, email addresses, Telegram
+  identifiers, IP addresses, and other personal data from reports and screenshots.
+- Report findings privately through a GitHub private vulnerability report:
+  https://github.com/dr-nathan/Zoekt-kamer-in-Amsterdam-automator/security/advisories/new
+- Include affected URL or file, reproduction steps, impact, minimal redacted
+  evidence, and a remediation suggestion.
+- Do not publish a vulnerability before it has been remediated and disclosure has
+  been explicitly agreed with the owner.
+
+Good-faith researchers who comply with this document are authorized to perform the
+testing described above. This authorization does not extend to third-party systems
+or activities outside these boundaries.
