@@ -7,7 +7,7 @@ from fb_automator.collector import FacebookCollector
 from fb_automator.config import load_groups
 from fb_automator.extractor import extract_database
 from fb_automator.image_reviewer import review_database_images
-from fb_automator.notifications import tracked_job
+from fb_automator.notifications import send_repeated_failure_alerts, tracked_job
 
 DEFAULT_PROFILE = Path(".state/facebook-profile")
 DEFAULT_DATABASE = Path("data/listings.db")
@@ -79,6 +79,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     digest.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
+    health_alert = subparsers.add_parser(
+        "health-alert", help="Notify the administrator about repeated job failures."
+    )
+    health_alert.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
     serve = subparsers.add_parser(
         "serve", help="Serve the private Chineur2000 web application."
     )
@@ -117,6 +122,14 @@ def main() -> None:
             raise SystemExit(f"error: {exc}") from exc
         print(
             f"channels={result.channels} sent={result.sent} "
+            f"skipped={result.skipped} failed={result.failed}"
+        )
+        return
+
+    if args.command == "health-alert":
+        result = send_repeated_failure_alerts(args.database)
+        print(
+            f"checked={result.checked} sent={result.sent} "
             f"skipped={result.skipped} failed={result.failed}"
         )
         return

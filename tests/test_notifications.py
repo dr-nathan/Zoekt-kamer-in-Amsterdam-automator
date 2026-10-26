@@ -19,6 +19,7 @@ from fb_automator.notifications import (
     csrf_token,
     decode_filter_values,
     encode_filter_values,
+    send_repeated_failure_alerts,
     sign_action,
     verify_action,
     verify_csrf,
@@ -200,6 +201,74 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(len(sent), 1)
         self.assertIn("CHF 1’200 / mois", str(sent[0]["text_body"]))
         self.assertIn("Se désabonner", str(sent[0]["text_body"]))
+
+    def test_repeated_failure_alerts_are_sent_once_per_failure_streak(self) -> None:
+        with NotificationStore(self.database) as store:
+            email, email_token = store.create_email_subscription(
+                "nathan@example.com", SearchSpec(city="lausanne"), "Nathan"
+            )
+            store.verify_email(str(email_token))
+            telegram, telegram_token = store.create_telegram_subscription(
+                SearchSpec(city="lausanne"), "Nathan"
+            )
+            store.verify_telegram(telegram_token, "12345", "@nathan")
+            for index in range(3):
+                store.connection.execute(
+                    """
+                    INSERT INTO job_runs (
+                        job_name, started_at, finished_at, status, error_summary
+                    ) VALUES ('collect', ?, ?, 'failed', ?)
+                    """,
+                    (
+                        f"2026-10-26T0{index}:00:00+00:00",
+                        f"2026-10-26T0{index}:00:01+00:00",
+                        "Facebook session expired",
+                    ),
+                )
+            store.connection.commit()
+
+        sent_email: list[dict[str, object]] = []
+        sent_telegram: list[dict[str, object]] = []
+
+        def fake_email(*args: object, **kwargs: object) -> str:
+            sent_email.append(kwargs)
+            return "email-alert-1"
+
+        def fake_telegram(*args: object, **kwargs: object) -> str:
+            sent_telegram.append(kwargs)
+            return "telegram-alert-1"
+
+        environment = {
+            "ADMIN_ALERT_CHANNEL_IDS": f"{email.id},{telegram.id}",
+            "JOB_FAILURE_ALERT_THRESHOLD": "3",
+        }
+        with patch.dict("os.environ", environment, clear=False):
+            first = send_repeated_failure_alerts(
+                self.database,
+                settings=self.settings,
+                email_sender=fake_email,
+                telegram_sender=fake_telegram,
+            )
+            second = send_repeated_failure_alerts(
+                self.database,
+                settings=self.settings,
+                email_sender=fake_email,
+                telegram_sender=fake_telegram,
+            )
+
+        self.assertEqual(first.sent, 2)
+        self.assertEqual(first.failed, 0)
+        self.assertEqual(second.sent, 0)
+        self.assertEqual(len(sent_email), 1)
+        self.assertEqual(len(sent_telegram), 1)
+        self.assertIn("3 fois consécutivement", str(sent_email[0]["text_body"]))
+        self.assertIn("Facebook session expired", str(sent_telegram[0]["text"]))
+
+        with NotificationStore(self.database) as store:
+            count = store.connection.execute(
+                "SELECT COUNT(*) FROM admin_events WHERE event_type = 'job_failure_alert_sent'"
+            ).fetchone()[0]
+        self.assertEqual(count, 2)
 
     def test_web_subscription_confirmation_unsubscribe_and_admin_boundary(self) -> None:
         environment = {

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import html
 import json
 import os
 import re
@@ -24,6 +25,7 @@ from fb_automator.visitor_tracking import browser_label
 AMSTERDAM_TIMEZONE = "Europe/Amsterdam"
 ACTIVE_CHANNEL_STATUSES = {"active"}
 VALID_CHANNEL_STATUSES = {"pending", "active", "paused", "unsubscribed", "bounced"}
+MONITORED_JOB_NAMES = ("collect", "extract")
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +66,14 @@ class NotificationSettings:
             and self.telegram_bot_username
             and self.telegram_webhook_secret
         )
+
+
+@dataclass(frozen=True, slots=True)
+class FailureAlertResult:
+    checked: int
+    sent: int
+    skipped: int
+    failed: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -831,6 +841,35 @@ class NotificationStore:
             "recent_visits": recent_visits,
         }
 
+    def record_admin_event(
+        self, event_type: str, subject_type: str, subject_id: str, details: dict[str, Any]
+    ) -> None:
+        with self.connection:
+            self._record_event(event_type, subject_type, subject_id, details)
+
+    def has_admin_event(self, event_type: str, subject_id: str) -> bool:
+        row = self.connection.execute(
+            "SELECT 1 FROM admin_events WHERE event_type = ? AND subject_id = ? LIMIT 1",
+            (event_type, subject_id),
+        ).fetchone()
+        return row is not None
+
+    def consecutive_job_failures(self, job_name: str) -> list[sqlite3.Row]:
+        failures: list[sqlite3.Row] = []
+        for row in self.connection.execute(
+            """
+            SELECT id, job_name, started_at, finished_at, status, error_summary
+            FROM job_runs
+            WHERE job_name = ? AND status IN ('success', 'failed')
+            ORDER BY id DESC
+            """,
+            (job_name,),
+        ):
+            if row["status"] != "failed":
+                break
+            failures.append(row)
+        return failures
+
     def _record_event(
         self, event_type: str, subject_type: str, subject_id: str, details: dict[str, Any]
     ) -> None:
@@ -896,6 +935,12 @@ def tracked_job(path: Path, job_name: str) -> Iterator[dict[str, Any]]:
         yield details
     except Exception as exc:
         finish_job(path, job_id, "failed", details, f"{type(exc).__name__}: {exc}")
+        if job_name in MONITORED_JOB_NAMES:
+            try:
+                send_repeated_failure_alerts(path, job_names=(job_name,))
+            except Exception:
+                # Operational alerts must never hide the original job failure.
+                pass
         raise
     else:
         finish_job(path, job_id, "success", details)
@@ -985,3 +1030,148 @@ def send_telegram_message(
 
 EmailSender = Callable[..., str]
 TelegramSender = Callable[..., str]
+
+
+def _admin_alert_channel_ids() -> tuple[int, ...]:
+    values: list[int] = []
+    for item in os.environ.get("ADMIN_ALERT_CHANNEL_IDS", "").split(","):
+        try:
+            channel_id = int(item.strip())
+        except ValueError:
+            continue
+        if channel_id > 0 and channel_id not in values:
+            values.append(channel_id)
+    return tuple(values)
+
+
+def _failure_threshold() -> int:
+    try:
+        return max(1, int(os.environ.get("JOB_FAILURE_ALERT_THRESHOLD", "3")))
+    except ValueError:
+        return 3
+
+
+def _safe_job_error(value: str) -> str:
+    sanitized = re.sub(r"sk-[A-Za-z0-9_*\-]+", "[clé OpenAI masquée]", value)
+    return sanitized[:400]
+
+
+def _failure_alert_content(
+    job_name: str,
+    failure_count: int,
+    last_failed_at: str,
+    error_summary: str,
+    settings: NotificationSettings,
+) -> tuple[str, str, str]:
+    label = "collecte Facebook" if job_name == "collect" else "extraction OpenAI"
+    subject = f"Chineur2000 — {label} en échec"
+    text = (
+        f"La {label} a échoué {failure_count} fois consécutivement.\n"
+        f"Dernier échec: {last_failed_at}\n"
+        f"Erreur: {_safe_job_error(error_summary) or 'Erreur non précisée'}\n\n"
+        f"Administration: {settings.base_url}/admin"
+    )
+    html_body = (
+        "<!doctype html><html><body style='font-family:Arial,sans-serif;color:#241b1d'>"
+        f"<h1>{html.escape(subject)}</h1>"
+        f"<p>La {html.escape(label)} a échoué <strong>{failure_count} fois</strong> "
+        "consécutivement.</p>"
+        f"<p><strong>Dernier échec :</strong> {html.escape(last_failed_at)}<br>"
+        f"<strong>Erreur :</strong> {html.escape(_safe_job_error(error_summary) or 'Erreur non précisée')}</p>"
+        f"<p><a href='{html.escape(settings.base_url, quote=True)}/admin'>Ouvrir l’administration</a></p>"
+        "</body></html>"
+    )
+    return subject, html_body, text
+
+
+def send_repeated_failure_alerts(
+    database: Path,
+    *,
+    job_names: tuple[str, ...] = MONITORED_JOB_NAMES,
+    settings: NotificationSettings | None = None,
+    email_sender: EmailSender = send_resend_email,
+    telegram_sender: TelegramSender = send_telegram_message,
+) -> FailureAlertResult:
+    selected_settings = settings or NotificationSettings.from_env()
+    channel_ids = _admin_alert_channel_ids()
+    threshold = _failure_threshold()
+    sent = 0
+    skipped = 0
+    failed = 0
+
+    with NotificationStore(database) as store:
+        channels: list[ChannelRecord] = []
+        for channel_id in channel_ids:
+            try:
+                channel = store.get_channel(channel_id)
+            except KeyError:
+                skipped += 1
+                continue
+            if channel.status != "active" or not channel.destination:
+                skipped += 1
+                continue
+            channels.append(channel)
+
+        for job_name in job_names:
+            failures = store.consecutive_job_failures(job_name)
+            if len(failures) < threshold:
+                skipped += 1
+                continue
+            latest = failures[0]
+            streak_start_id = int(failures[-1]["id"])
+            subject, html_body, text_body = _failure_alert_content(
+                job_name,
+                len(failures),
+                str(latest["finished_at"] or latest["started_at"]),
+                str(latest["error_summary"] or ""),
+                selected_settings,
+            )
+            for channel in channels:
+                event_subject = f"{job_name}:{streak_start_id}:{channel.id}"
+                if store.has_admin_event("job_failure_alert_sent", event_subject):
+                    skipped += 1
+                    continue
+                try:
+                    if channel.channel_type == "email":
+                        provider_id = email_sender(
+                            selected_settings,
+                            to=channel.destination,
+                            subject=subject,
+                            html_body=html_body,
+                            text_body=text_body,
+                        )
+                    elif channel.channel_type == "telegram":
+                        provider_id = telegram_sender(
+                            selected_settings,
+                            chat_id=channel.destination,
+                            text=text_body,
+                        )
+                    else:
+                        raise RuntimeError(f"Unsupported channel: {channel.channel_type}")
+                except Exception as exc:
+                    store.record_admin_event(
+                        "job_failure_alert_failed",
+                        "job",
+                        event_subject,
+                        {
+                            "channel": channel.channel_type,
+                            "error": f"{type(exc).__name__}: {exc}"[:400],
+                        },
+                    )
+                    failed += 1
+                else:
+                    store.record_admin_event(
+                        "job_failure_alert_sent",
+                        "job",
+                        event_subject,
+                        {
+                            "channel": channel.channel_type,
+                            "provider_message_id": provider_id,
+                            "failure_count": len(failures),
+                        },
+                    )
+                    sent += 1
+
+    return FailureAlertResult(
+        checked=len(job_names), sent=sent, skipped=skipped, failed=failed
+    )
