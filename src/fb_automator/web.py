@@ -18,7 +18,7 @@ from typing import Any
 from urllib.parse import quote, urlparse
 
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from starlette.background import BackgroundTasks
@@ -45,6 +45,7 @@ from fb_automator.visitor_tracking import client_ip, record_page_view, should_tr
 
 DEFAULT_DATABASE = Path("data/listings.db")
 ASSET_ROOT = Path(__file__).parent / "web_assets"
+SECURITY_VERIFICATION_PATH = ASSET_ROOT / "security-verification.txt"
 ASSET_VERSION = "20261003-3"
 LISTING_MAX_AGE_DAYS = 14
 
@@ -503,6 +504,17 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
                 asset_version=ASSET_VERSION,
                 database_ready=database_path.exists(),
             )
+        )
+
+    @application.get(
+        "/.well-known/security-verification.txt",
+        response_class=PlainTextResponse,
+        include_in_schema=False,
+    )
+    def security_verification() -> PlainTextResponse:
+        return PlainTextResponse(
+            SECURITY_VERIFICATION_PATH.read_text(encoding="utf-8"),
+            headers={"Cache-Control": "no-store"},
         )
 
     @application.get("/ville/{city_slug}", response_class=HTMLResponse)
