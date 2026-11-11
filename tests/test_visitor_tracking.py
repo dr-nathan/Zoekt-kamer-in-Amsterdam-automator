@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -34,7 +35,7 @@ class VisitorTrackingTests(unittest.TestCase):
             },
         )
 
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection:
             view = connection.execute(
                 "SELECT ip_address, path, city, country FROM page_views"
             ).fetchone()
@@ -70,7 +71,7 @@ class VisitorTrackingTests(unittest.TestCase):
             geo_lookup=lookup,
         )
 
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection:
             count = connection.execute("SELECT COUNT(*) FROM page_views").fetchone()[0]
         self.assertEqual(count, 2)
         self.assertEqual(calls, 1)

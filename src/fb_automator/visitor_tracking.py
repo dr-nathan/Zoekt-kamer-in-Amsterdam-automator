@@ -6,6 +6,7 @@ import sqlite3
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Callable
@@ -53,7 +54,7 @@ def record_page_view(
     lookup_cutoff = (observed_at - timedelta(days=GEO_CACHE_DAYS)).isoformat()
     database.parent.mkdir(parents=True, exist_ok=True)
 
-    with sqlite3.connect(database, timeout=15) as connection:
+    with closing(sqlite3.connect(database, timeout=15)) as connection:
         connection.row_factory = sqlite3.Row
         connection.executescript(SCHEMA)
         cached = connection.execute(
@@ -94,7 +95,7 @@ def record_page_view(
         key: str(resolved.get(key, ""))[:160]
         for key in ("city", "region", "country", "country_code", "provider")
     }
-    with sqlite3.connect(database, timeout=15) as connection:
+    with closing(sqlite3.connect(database, timeout=15)) as connection:
         connection.execute(
             """
             INSERT INTO visitor_geo (
