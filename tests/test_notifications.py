@@ -79,7 +79,7 @@ class NotificationTests(unittest.TestCase):
         connection.close()
         self.settings = NotificationSettings(
             base_url="https://facebookrooms.nl",
-            app_secret="test-secret-with-enough-entropy",
+            app_secret="test-secret-with-enough-entropy-for-security-tests",
             resend_api_key="re_test",
             resend_from="alerts@facebookrooms.nl",
             resend_webhook_secret="whsec_test",
@@ -273,6 +273,7 @@ class NotificationTests(unittest.TestCase):
     def test_web_subscription_confirmation_unsubscribe_and_admin_boundary(self) -> None:
         environment = {
             "APP_SECRET": self.settings.app_secret,
+            "ADMIN_PROXY_SECRET": "synthetic-admin-proxy-secret-32bytes-minimum",
             "PUBLIC_BASE_URL": self.settings.base_url,
             "RESEND_API_KEY": self.settings.resend_api_key,
             "RESEND_FROM": self.settings.resend_from,
@@ -350,7 +351,7 @@ class NotificationTests(unittest.TestCase):
                 self.assertIn("Alertes arrêtées", unsubscribed.text)
 
                 self.assertEqual(client.get("/admin").status_code, 404)
-                admin = client.get("/admin", headers={"x-chineur-admin": "1"})
+                admin = client.get("/admin", headers={"x-chineur-admin": environment["ADMIN_PROXY_SECRET"]})
                 self.assertEqual(admin.status_code, 200)
                 self.assertIn("Tableau de bord", admin.text)
 
@@ -366,14 +367,18 @@ class NotificationTests(unittest.TestCase):
                 "--port",
                 "8123",
             ],
-        ), patch("uvicorn.run") as run:
+        ), patch("uvicorn.run") as run, patch(
+            "fb_automator.web.create_app", wraps=create_app
+        ) as factory:
             cli_main()
 
+        factory.assert_called_once_with(requested_database.resolve())
         application = run.call_args.args[0]
         self.assertEqual(run.call_args.kwargs["port"], 8123)
         with TestClient(application) as client:
             health = client.get("/health").json()
-        self.assertEqual(health["database"], str(requested_database.resolve()))
+        self.assertEqual(health, {"status": "waiting_for_database"})
+        self.assertNotIn("database", health)
 
     def test_provider_requests_identify_the_application(self) -> None:
         with patch("urllib.request.urlopen") as urlopen:

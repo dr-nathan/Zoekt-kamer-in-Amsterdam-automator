@@ -1,0 +1,5 @@
+# Reviewed public proof-of-control token, intentionally published for the 2026 assessment.
+# These immutable fingerprints exclude only that token at this exact historical location.
+# They do not exclude this file, rule or line in any other commit.
+ebcaadecc040f95fea660ce800045816785be03f:src/fb_automator/web_assets/security-verification.txt:generic-api-key:3
+9bfee5900ad5870de5f25057f0690693586811b7:src/fb_automator/web_assets/security-verification.txt:generic-api-key:3

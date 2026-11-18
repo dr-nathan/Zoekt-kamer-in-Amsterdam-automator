@@ -17,6 +17,7 @@ from playwright.sync_api import (
     sync_playwright,
 )
 
+from fb_automator.image_downloader import IMAGE_TYPES, download_image, is_allowed_image_url
 from fb_automator.models import GroupSource, RawPost
 from fb_automator.storage import PostStore, dedupe_key
 
@@ -39,13 +40,7 @@ COMMENT_HINT = re.compile(r"comment|commentaar|opmerking", re.IGNORECASE)
 REACTION_HINT = re.compile(
     r"reaction|reactie|reacted|gereageerd|likes?|vind-ik-leuk", re.IGNORECASE
 )
-IMAGE_TYPES = {
-    "image/jpeg": "jpg",
-    "image/png": "png",
-    "image/webp": "webp",
-}
 MAX_IMAGES_PER_POST = 3
-MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 
 def _human_count(value: str) -> int | None:
@@ -350,6 +345,18 @@ class FacebookCollector:
         raw_items: list[dict[str, Any]] = page.locator(POST_BODY_SELECTOR).evaluate_all(
             r"""
             (nodes) => {
+              const isAllowedImageUrl = (value) => {
+                if (/[\u0000-\u0020\u007f]/.test(value)) return false;
+                try {
+                  const url = new URL(value);
+                  return url.protocol === 'https:' && !url.username && !url.password &&
+                    (!url.port || url.port === '443') && !url.hash &&
+                    ['facebook.com', 'fbcdn.net'].some((domain) =>
+                      url.hostname === domain || url.hostname.endsWith(`.${domain}`));
+                } catch {
+                  return false;
+                }
+              };
               const unique = [...new Set(nodes)];
               return unique.map((message) => {
                 // Facebook renders the original post inside a blockquote. Comments use
@@ -379,7 +386,7 @@ class FacebookCollector:
                       const height = Math.max(rect.height, image.naturalHeight || 0);
                       const src = image.currentSrc || image.src || '';
                       return width >= 280 && height >= 160 &&
-                        /(?:fbcdn\.net|facebook\.com)/i.test(src);
+                        isAllowedImageUrl(src);
                     });
                   if (hasGalleryImage) break;
                 }
@@ -445,9 +452,9 @@ class FacebookCollector:
                     };
                   })
                   .filter((image) => {
-                    if (!image.src.startsWith('https://') || image.profile) return false;
+                    if (!isAllowedImageUrl(image.src) || image.profile) return false;
                     if (image.width < 280 || image.height < 160) return false;
-                    return /(?:fbcdn\.net|facebook\.com)/i.test(image.src);
+                    return true;
                   })
                   .sort((a, b) => (b.width * b.height) - (a.width * a.height))
                   .map((image) => image.src)
@@ -506,7 +513,8 @@ class FacebookCollector:
                     reaction_count=reaction_count,
                     comment_count=comment_count,
                     image_urls=tuple(
-                        str(url) for url in item.get("images", []) if str(url)
+                        str(url) for url in item.get("images", [])
+                        if is_allowed_image_url(str(url))
                     ),
                     source_city=group.city,
                     embedded_listing_text=str(
@@ -533,21 +541,11 @@ class FacebookCollector:
                 stored = store.stored_image_path(raw_post_key, source_url)
                 if stored and (self.database.parent / stored).is_file():
                     continue
-                try:
-                    response = context.request.get(
-                        source_url,
-                        headers={"Referer": post.post_url or post.group_url},
-                        timeout=30_000,
-                    )
-                    content_type = response.headers.get("content-type", "").split(";", 1)[0]
-                    extension = IMAGE_TYPES.get(content_type)
-                    if not response.ok or extension is None:
-                        continue
-                    body = response.body()
-                    if not body or len(body) > MAX_IMAGE_BYTES:
-                        continue
-                except Exception:
+                image = download_image(source_url, referer=post.post_url or post.group_url)
+                if image is None:
                     continue
+                body, content_type = image
+                extension = IMAGE_TYPES[content_type]
 
                 content_hash = hashlib.sha256(body).hexdigest()
                 digest = content_hash[:16]
