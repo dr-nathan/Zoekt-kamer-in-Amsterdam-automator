@@ -17,11 +17,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlparse
 
-from fastapi import FastAPI, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from starlette.background import BackgroundTasks
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from fb_automator.listing_models import (
     AmsterdamNeighborhood,
@@ -35,17 +36,18 @@ from fb_automator.notifications import (
     csrf_token,
     decode_filter_values,
     encode_filter_values,
+    is_valid_app_secret,
     send_resend_email,
     send_telegram_message,
     sign_action,
     verify_action,
     verify_csrf,
 )
+from fb_automator.security import RequestLimiter, SecurityMiddleware
 from fb_automator.visitor_tracking import client_ip, record_page_view, should_track_visit
 
 DEFAULT_DATABASE = Path("data/listings.db")
 ASSET_ROOT = Path(__file__).parent / "web_assets"
-SECURITY_VERIFICATION_PATH = ASSET_ROOT / "security-verification.txt"
 ASSET_VERSION = "20261003-3"
 LISTING_MAX_AGE_DAYS = 14
 
@@ -445,6 +447,8 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
     database_path = database or Path(os.environ.get("FB_DATABASE", DEFAULT_DATABASE))
     repository = ListingRepository(database_path, now=now)
     notification_settings = NotificationSettings.from_env()
+    admin_proxy_secret = os.environ.get("ADMIN_PROXY_SECRET", "")
+    limiter = RequestLimiter()
     templates = Environment(
         loader=FileSystemLoader(ASSET_ROOT / "templates"),
         autoescape=select_autoescape(["html", "xml"]),
@@ -458,7 +462,22 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
         description="Flux privé d’annonces de logement à Amsterdam, Lausanne et Berne.",
         docs_url=None,
         redoc_url=None,
+        openapi_url=None,
     )
+    application.state.request_limiter = limiter
+    allowed_hosts = [host.strip() for host in os.environ.get(
+        "FB_ALLOWED_HOSTS", "facebookrooms.nl,www.facebookrooms.nl,localhost,127.0.0.1,testserver"
+    ).split(",") if host.strip()]
+    if not allowed_hosts or "*" in allowed_hosts:
+        raise RuntimeError("FB_ALLOWED_HOSTS must contain explicit hostnames.")
+    application.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts, www_redirect=False)
+    application.add_middleware(SecurityMiddleware, limiter=limiter)
+
+    def admin_authorized(request: Request) -> bool:
+        supplied = request.headers.get("x-chineur-admin", "")
+        return is_valid_app_secret(admin_proxy_secret) and hmac.compare_digest(
+            supplied.encode("utf-8"), admin_proxy_secret.encode("utf-8")
+        )
     application.mount(
         "/static", StaticFiles(directory=ASSET_ROOT / "static"), name="static"
     )
@@ -504,17 +523,6 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
                 asset_version=ASSET_VERSION,
                 database_ready=database_path.exists(),
             )
-        )
-
-    @application.get(
-        "/.well-known/security-verification.txt",
-        response_class=PlainTextResponse,
-        include_in_schema=False,
-    )
-    def security_verification() -> PlainTextResponse:
-        return PlainTextResponse(
-            SECURITY_VERIFICATION_PATH.read_text(encoding="utf-8"),
-            headers={"Cache-Control": "no-store"},
         )
 
     @application.get("/ville/{city_slug}", response_class=HTMLResponse)
@@ -593,17 +601,19 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
             return _message_response(
                 templates, "Lien expiré", "Rechargez la page et réessayez.", status_code=403
             )
+        verification_token = None
         try:
+            from fb_automator.notifications import destination_fingerprint, validate_email
+            destination = validate_email(data.get("email", ""))
+            if not limiter.allow("email-destination", destination_fingerprint("email", destination), limit=3, window=3600):
+                return _message_response(
+                    templates, "Vérifiez votre boîte mail",
+                    "Si cette adresse peut recevoir des alertes, un lien de confirmation lui sera envoyé.",
+                )
             search = _search_spec_from_multi_values(form_values)
             with NotificationStore(database_path) as store:
                 channel, verification_token = store.create_email_subscription(
                     data.get("email", ""), search, data.get("display_name", "")
-                )
-            if verification_token is None:
-                return _message_response(
-                    templates,
-                    "Filtres enregistrés",
-                    "Cette adresse est déjà vérifiée. Les nouveaux filtres ont été ajoutés à son récapitulatif quotidien.",
                 )
             verification_url = (
                 f"{notification_settings.base_url}/subscriptions/confirm/{verification_token}"
@@ -628,16 +638,19 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
                 templates, "Informations invalides", str(exc), status_code=400
             )
         except RuntimeError:
+            if verification_token is not None:
+                with NotificationStore(database_path) as store:
+                    store.discard_email_subscription_request(verification_token)
             return _message_response(
                 templates,
-                "Adresse enregistrée",
-                "L’adresse a été enregistrée, mais le message de vérification n’a pas pu partir. Réessayez dans quelques minutes.",
+                "Envoi indisponible",
+                "Le message de confirmation n’a pas pu partir. Réessayez dans quelques minutes.",
                 status_code=502,
             )
         return _message_response(
             templates,
             "Vérifiez votre boîte mail",
-            "Cliquez sur le lien reçu pour activer le récapitulatif quotidien de 09:00.",
+            "Si cette adresse peut recevoir des alertes, un lien de confirmation lui sera envoyé.",
         )
 
     @application.post("/subscriptions/telegram")
@@ -781,7 +794,7 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
         if (
             not notification_settings.telegram_enabled
             or not hmac.compare_digest(
-                supplied_secret, notification_settings.telegram_webhook_secret
+                supplied_secret.encode("utf-8"), notification_settings.telegram_webhook_secret.encode("utf-8")
             )
         ):
             return JSONResponse({"ok": False}, status_code=403)
@@ -790,17 +803,29 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
         except json.JSONDecodeError:
             return JSONResponse({"ok": False}, status_code=400)
 
+        if not isinstance(payload, dict):
+            return JSONResponse({"ok": False}, status_code=400)
+
         message = payload.get("message") or {}
         callback = payload.get("callback_query") or {}
+        if not isinstance(message, dict) or not isinstance(callback, dict):
+            return JSONResponse({"ok": False}, status_code=400)
         if callback:
             message = callback.get("message") or {}
+        if not isinstance(message, dict):
+            return JSONResponse({"ok": False}, status_code=400)
         chat = message.get("chat") or {}
+        if not isinstance(chat, dict):
+            return JSONResponse({"ok": False}, status_code=400)
         chat_id = str(chat.get("id") or "")
         if not chat_id:
             return JSONResponse({"ok": True})
         text = str(message.get("text") or "").strip()
         callback_data = str(callback.get("data") or "")
-        username = str((message.get("from") or callback.get("from") or {}).get("username") or "")
+        sender = message.get("from") or callback.get("from") or {}
+        if not isinstance(sender, dict):
+            return JSONResponse({"ok": False}, status_code=400)
+        username = str(sender.get("username") or "")
         display = f"@{username}" if username else "Telegram"
 
         response_text = ""
@@ -885,7 +910,7 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
 
     @application.get("/admin", response_class=HTMLResponse)
     def admin_dashboard(request: Request) -> HTMLResponse:
-        if request.headers.get("x-chineur-admin") != "1":
+        if not admin_authorized(request):
             return HTMLResponse("Introuvable", status_code=404)
         with NotificationStore(database_path) as store:
             snapshot = store.admin_snapshot()
@@ -904,9 +929,20 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
             )
         )
 
+    @application.get("/internal/admin-guard", include_in_schema=False)
+    def admin_rate_guard(request: Request):
+        # Caddy checks this before its expensive password authentication.
+        if not admin_authorized(request):
+            return HTMLResponse("Introuvable", status_code=404)
+        identity = client_ip(request) or "unknown"
+        if not limiter.allow("admin-authentication", identity, limit=10, window=60):
+            return JSONResponse({"detail": "Too many authentication attempts"}, status_code=429,
+                                headers={"Retry-After": "60"})
+        return HTMLResponse("", status_code=204)
+
     @application.post("/admin/channels/{channel_id}")
     async def admin_update_channel(channel_id: int, request: Request):
-        if request.headers.get("x-chineur-admin") != "1":
+        if not admin_authorized(request):
             return HTMLResponse("Introuvable", status_code=404)
         data = await _form_values(request)
         if not verify_csrf(
@@ -927,7 +963,6 @@ def create_app(database: Path | None = None, now: datetime | None = None) -> Fas
     def health() -> dict[str, str]:
         return {
             "status": "ok" if database_path.exists() else "waiting_for_database",
-            "database": str(database_path),
         }
 
     return application
@@ -1260,8 +1295,11 @@ async def _form_multi_values(request: Request) -> dict[str, list[str]]:
     content_type = request.headers.get("content-type", "")
     if "application/x-www-form-urlencoded" not in content_type:
         return {}
-    body = (await request.body()).decode("utf-8", errors="replace")
-    return urllib.parse.parse_qs(body, keep_blank_values=True, max_num_fields=100)
+    try:
+        body = (await request.body()).decode("utf-8", errors="strict")
+        return urllib.parse.parse_qs(body, keep_blank_values=True, max_num_fields=100, errors="strict")
+    except (UnicodeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid form data") from None
 
 
 def _last_form_values(values: dict[str, list[str]]) -> dict[str, str]:

@@ -1,7 +1,3 @@
-<a href="https://gitviewsmap.onrender.com/dr-nathan">
-  <img src="https://gitviewsmap.onrender.com/badge/dr-nathan.svg" alt="GitViewsMap Visitor Badge" />
-</a>
-
 # Chineur2000
 
 <p align="center">
@@ -118,6 +114,14 @@ Run the test suite with:
 ```bash
 python -m unittest discover -s tests
 ```
+
+## Security and private data
+
+Keep API keys, browser sessions, databases, subscriber information and assessment evidence outside
+git. Before publishing changes, install [Gitleaks](https://github.com/gitleaks/gitleaks/releases) and
+run `python3 .github/scripts/scan_secrets.py --staged`. The repository's security workflow scans git
+history with redacted output and audits the locked runtime dependencies against published
+advisories. See [SECURITY.md](SECURITY.md) for private reporting, credential rotation and audit scope.
 
 ## Project structure
 

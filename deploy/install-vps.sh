@@ -30,7 +30,8 @@ python3 -m venv --clear "$APP_DIR/.venv"
 chown -R nathan:nathan "$APP_DIR/.venv"
 
 runuser -u nathan -- "$APP_DIR/.venv/bin/python" -m pip install --upgrade pip
-runuser -u nathan -- "$APP_DIR/.venv/bin/python" -m pip install -e "$APP_DIR"
+runuser -u nathan -- "$APP_DIR/.venv/bin/python" -m pip install --require-hashes -r "$APP_DIR/requirements.lock"
+runuser -u nathan -- "$APP_DIR/.venv/bin/python" -m pip install --no-deps "$APP_DIR"
 "$APP_DIR/.venv/bin/python" -m playwright install-deps chromium
 runuser -u nathan -- env HOME=/home/nathan \
     "$APP_DIR/.venv/bin/python" -m playwright install chromium
@@ -46,11 +47,10 @@ install -m 0644 "$APP_DIR/deploy/facebookrooms-digest.service" \
 install -m 0644 "$APP_DIR/deploy/facebookrooms-digest.timer" \
     /etc/systemd/system/facebookrooms-digest.timer
 
-password_hash=$(sed -n '1p' "$PASSWORD_HASH_FILE")
-admin_password_hash=$(sed -n '1p' "$ADMIN_PASSWORD_HASH_FILE")
-sed -e "s|REPLACE_WITH_CADDY_PASSWORD_HASH|$password_hash|" \
-    -e "s|REPLACE_WITH_ADMIN_PASSWORD_HASH|$admin_password_hash|" \
-    "$APP_DIR/deploy/Caddyfile.example" > /etc/caddy/Caddyfile
+python3 "$APP_DIR/deploy/configure-production.py" --app-dir "$APP_DIR" --output /etc/caddy/Caddyfile --private-feed
+chown root:caddy /etc/caddy/Caddyfile
+chmod 0640 /etc/caddy/Caddyfile
+install -d -o caddy -g caddy -m 0750 /var/log/caddy
 caddy fmt --overwrite /etc/caddy/Caddyfile
 caddy validate --config /etc/caddy/Caddyfile
 

@@ -24,3 +24,15 @@ storage-state.json
 .env
 .env.*
 !.env.example
+.venv/
+venv/
+build/
+dist/
+.coverage
+htmlcov/
+security-assessment-*/
+gitleaks-report*
+*.har
+*.log
+*.bak
+*.backup

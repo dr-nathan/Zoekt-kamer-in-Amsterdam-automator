@@ -30,7 +30,7 @@ if [[ "$admin_password" != "$admin_password_confirmation" ]]; then
     exit 1
 fi
 unset admin_password_confirmation
-admin_hash=$(caddy hash-password --plaintext "$admin_password")
+admin_hash=$(printf '%s\n' "$admin_password" | caddy hash-password --algorithm bcrypt)
 unset admin_password
 umask 077
 printf '%s\n' "$admin_hash" > "$ADMIN_HASH_FILE"
@@ -88,16 +88,11 @@ path.chmod(0o600)
 PY
 
 unset app_secret resend_api_key resend_from resend_webhook_secret
-telegram_webhook_secret=$(sed -n 's/^TELEGRAM_WEBHOOK_SECRET=//p' "$ENV_FILE")
-
-site_hash=$(sed -n '1p' "$SITE_HASH_FILE")
-admin_hash=$(sed -n '1p' "$ADMIN_HASH_FILE")
 temporary_caddy=$(mktemp)
-sed -e "s|REPLACE_WITH_CADDY_PASSWORD_HASH|$site_hash|" \
-    -e "s|REPLACE_WITH_ADMIN_PASSWORD_HASH|$admin_hash|" \
-    "$APP_DIR/deploy/Caddyfile.example" > "$temporary_caddy"
+python3 "$APP_DIR/deploy/configure-production.py" --app-dir "$APP_DIR" --output "$temporary_caddy" --private-feed
 
-sudo install -m 0644 "$temporary_caddy" /etc/caddy/Caddyfile
+sudo install -d -o caddy -g caddy -m 0750 /var/log/caddy
+sudo install -o root -g caddy -m 0640 "$temporary_caddy" /etc/caddy/Caddyfile
 rm -f "$temporary_caddy"
 sudo caddy fmt --overwrite /etc/caddy/Caddyfile
 sudo caddy validate --config /etc/caddy/Caddyfile
@@ -112,11 +107,25 @@ sudo systemctl restart facebookrooms.service
 sudo systemctl reload caddy
 
 if [[ -n "$telegram_bot_token" && -n "$telegram_bot_username" ]]; then
-    response=$(curl -fsS \
-        -H 'Content-Type: application/json' \
-        -d "{\"url\":\"https://facebookrooms.nl/webhooks/telegram\",\"secret_token\":\"$telegram_webhook_secret\",\"allowed_updates\":[\"message\",\"callback_query\"]}" \
-        "https://api.telegram.org/bot${telegram_bot_token}/setWebhook")
-    printf 'Telegram webhook: %s\n' "$response"
+    "$APP_DIR/.venv/bin/python" - <<'PY'
+from pathlib import Path
+import json
+import urllib.request
+
+values = dict(line.split("=", 1) for line in Path("/home/nathan/facebookrooms/.env").read_text().splitlines()
+              if line and not line.lstrip().startswith("#") and "=" in line)
+payload = {"url": "https://facebookrooms.nl/webhooks/telegram",
+           "secret_token": values["TELEGRAM_WEBHOOK_SECRET"],
+           "allowed_updates": ["message", "callback_query"]}
+request = urllib.request.Request("https://api.telegram.org/bot" + values["TELEGRAM_BOT_TOKEN"] + "/setWebhook",
+                                 data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
+try:
+    with urllib.request.urlopen(request, timeout=15) as response:
+        result = json.load(response)
+    print("Telegram webhook configured:", bool(result.get("ok")))
+except Exception:
+    raise SystemExit("Telegram webhook setup failed; secret-bearing request details were suppressed.") from None
+PY
 fi
 
 unset telegram_bot_token telegram_bot_username telegram_webhook_secret

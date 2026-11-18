@@ -15,6 +15,7 @@ from fb_automator.collector import (
     post_id_from_url,
 )
 from fb_automator.models import GroupSource, RawPost
+from fb_automator.storage import PostStore, dedupe_key
 
 
 class PostUrlTests(unittest.TestCase):
@@ -89,6 +90,7 @@ class PostUrlTests(unittest.TestCase):
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page()
+            page.route("**/*", lambda route: route.abort())
             page.set_content(html)
             posts = FacebookCollector._extract_visible_posts(
                 page,
@@ -103,6 +105,87 @@ class PostUrlTests(unittest.TestCase):
         self.assertEqual(len(posts), 1)
         self.assertNotIn("CHF1,300", posts[0].text)
         self.assertIn("CHF1,300", posts[0].embedded_listing_text)
+
+    def test_python_extraction_rejects_image_urls_outside_host_boundaries(self) -> None:
+        page = MagicMock()
+        allowed = "https://scontent.example.fbcdn.net/room.jpg?signature=unchanged"
+        page.locator.return_value.evaluate_all.return_value = [{
+            "text": "Synthetic housing offer long enough to extract safely.",
+            "images": [
+                "https://127.0.0.1/image?facebook.com",
+                "https://facebook.com.attacker.invalid/room.jpg",
+                "https://attacker.invalid/fbcdn.net/room.jpg",
+                allowed,
+            ],
+        }]
+        posts = FacebookCollector._extract_visible_posts(
+            page, GroupSource("Synthetic", "https://www.facebook.com/groups/synthetic", "lausanne")
+        )
+        self.assertEqual(posts[0].image_urls, (allowed,))
+
+    def test_browser_extraction_filters_untrusted_image_hosts(self) -> None:
+        # Abort all image requests: this checks DOM selection without contacting
+        # Facebook, the CDN, or the intentionally invalid test destinations.
+        html = """
+        <section>
+          <a href="https://www.facebook.com/groups/123/posts/456">2 h</a>
+          <div><blockquote>
+            Studio lumineux de 30 m² à Lausanne, disponible dès novembre.
+          </blockquote>
+          <img src="https://facebook.com.attacker.invalid/room.jpg" width="600" height="400">
+          <img src="https://127.0.0.1/image?facebook.com" width="600" height="400">
+          <img src="https://scontent.example.fbcdn.net/room.jpg" width="320" height="200">
+          </div>
+        </section>
+        """
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.route("**/*", lambda route: route.abort())
+            page.set_content(html)
+            posts = FacebookCollector._extract_visible_posts(
+                page, GroupSource("Synthetic", "https://www.facebook.com/groups/123", "lausanne")
+            )
+            browser.close()
+        self.assertEqual(posts[0].image_urls, ("https://scontent.example.fbcdn.net/room.jpg",))
+
+
+class ImageStorageTests(unittest.TestCase):
+    def test_download_uses_cookie_free_fetch_and_caches_existing_images(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "listings.db"
+            collector = FacebookCollector(Path(directory) / "profile", database)
+            context = MagicMock()
+            url = "https://scontent.example.fbcdn.net/room.jpg?signature=unchanged"
+            post = RawPost(
+                "Synthetic", "https://www.facebook.com/groups/synthetic", "42",
+                "https://www.facebook.com/groups/synthetic/posts/42",
+                "Synthetic housing offer", "Today", "2026-11-18T12:00:00+00:00",
+                image_urls=(url,), source_city="lausanne",
+            )
+            with PostStore(database) as store, patch(
+                "fb_automator.collector.download_image", return_value=(b"synthetic-image", "image/jpeg")
+            ) as fetch:
+                _, _, resolved = store.upsert([post])
+                self.assertEqual(collector._download_images(context, [post], store, resolved), 1)
+                path = store.stored_image_path(dedupe_key(post), url)
+                self.assertEqual((database.parent / path).read_bytes(), b"synthetic-image")
+                self.assertEqual(collector._download_images(context, [post], store, resolved), 0)
+            fetch.assert_called_once_with(url, referer=post.post_url)
+            context.request.get.assert_not_called()
+
+    def test_rejected_download_does_not_create_a_media_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "listings.db"
+            collector = FacebookCollector(Path(directory) / "profile", database)
+            post = RawPost("Synthetic", "group", None, None, "Synthetic", "Today", "2026-11-18",
+                           image_urls=("https://127.0.0.1/image?facebook.com",))
+            with PostStore(database) as store, patch(
+                "fb_automator.collector.download_image", return_value=None
+            ):
+                _, _, resolved = store.upsert([post])
+                self.assertEqual(collector._download_images(MagicMock(), [post], store, resolved), 0)
+            self.assertFalse((database.parent / "images").exists())
 
 
 class SessionTransferTests(unittest.TestCase):

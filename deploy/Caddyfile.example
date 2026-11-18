@@ -1,25 +1,78 @@
 facebookrooms.nl, www.facebookrooms.nl {
 	encode zstd gzip
+	request_body {
+		max_size 65536
+	}
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' https://t.me; upgrade-insecure-requests"
+	}
+	log {
+		output file /var/log/caddy/facebookrooms-access.json {
+			roll_size 10MiB
+			roll_keep 7
+			roll_keep_for 168h
+		}
+		format filter {
+			wrap json
+			fields {
+				request>headers delete
+				request>uri delete
+				resp_headers delete
+				request>remote_ip ip_mask {
+					ipv4 24
+					ipv6 48
+				}
+				request>client_ip ip_mask {
+					ipv4 24
+					ipv6 48
+				}
+			}
+		}
+	}
+	@blocked path /.env* /.git* /wp-* /xmlrpc.php *.php /openapi.json /docs /redoc /.well-known/security-verification.txt
+	respond @blocked 404
 
 	@admin path /admin /admin/*
 	handle @admin {
-		basic_auth {
-			admin REPLACE_WITH_ADMIN_PASSWORD_HASH
-		}
-		reverse_proxy 127.0.0.1:8000 {
-			header_up X-Chineur-Admin "1"
+		route {
+			forward_auth 127.0.0.1:8000 {
+				uri /internal/admin-guard
+				header_up X-Chineur-Admin "REPLACE_WITH_ADMIN_PROXY_SECRET"
+				header_up X-Forwarded-For {remote_host}
+				header_up -Authorization
+			}
+			basic_auth {
+				admin REPLACE_WITH_ADMIN_PASSWORD_HASH
+			}
+			reverse_proxy 127.0.0.1:8000 {
+				header_up X-Chineur-Admin "REPLACE_WITH_ADMIN_PROXY_SECRET"
+				header_up X-Forwarded-For {remote_host}
+				header_up -Authorization
+			}
 		}
 	}
 
 	@public_notification_routes path /subscriptions/confirm/* /subscriptions/manage/* /unsubscribe/* /webhooks/telegram /webhooks/resend
 	handle @public_notification_routes {
-		reverse_proxy 127.0.0.1:8000
+		reverse_proxy 127.0.0.1:8000 {
+			header_up -X-Chineur-Admin
+			header_up X-Forwarded-For {remote_host}
+			header_up -Authorization
+		}
 	}
 
 	handle {
-		basic_auth {
-			nathan REPLACE_WITH_CADDY_PASSWORD_HASH
+		REPLACE_WITH_PUBLIC_AUTH
+		reverse_proxy 127.0.0.1:8000 {
+			header_up -X-Chineur-Admin
+			header_up X-Forwarded-For {remote_host}
+			header_up -Authorization
 		}
-		reverse_proxy 127.0.0.1:8000
 	}
 }

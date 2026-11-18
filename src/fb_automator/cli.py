@@ -101,7 +101,11 @@ def main() -> None:
         import uvicorn
         from fb_automator.web import create_app
 
-        uvicorn.run(create_app(args.database.resolve()), host=args.host, port=args.port)
+        uvicorn.run(
+            create_app(args.database.resolve()), host=args.host, port=args.port,
+            server_header=False, access_log=False, limit_concurrency=32,
+            timeout_keep_alive=5, proxy_headers=True, forwarded_allow_ips="127.0.0.1,::1",
+        )
         return
 
     if args.command == "digest":

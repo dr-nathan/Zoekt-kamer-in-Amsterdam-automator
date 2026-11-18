@@ -12,7 +12,7 @@ import sqlite3
 import urllib.error
 import urllib.request
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta
 from email.utils import parseaddr
 from pathlib import Path
@@ -26,6 +26,30 @@ AMSTERDAM_TIMEZONE = "Europe/Amsterdam"
 ACTIVE_CHANNEL_STATUSES = {"active"}
 VALID_CHANNEL_STATUSES = {"pending", "active", "paused", "unsubscribed", "bounced"}
 MONITORED_JOB_NAMES = ("collect", "extract")
+MIN_APP_SECRET_BYTES = 32
+EMAIL_CONFIRMATION_TTL = timedelta(hours=24)
+EMAIL_REQUEST_SCHEMA = """
+CREATE TABLE IF NOT EXISTS pending_email_subscriptions (
+    token_hash TEXT PRIMARY KEY,
+    channel_id INTEGER NOT NULL,
+    search_json TEXT NOT NULL,
+    display_name TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    FOREIGN KEY (channel_id) REFERENCES notification_channels(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_pending_email_channel
+    ON pending_email_subscriptions (channel_id);
+"""
+
+
+def is_valid_app_secret(secret: str) -> bool:
+    """Require a configured secret of at least 32 bytes; provision it randomly."""
+    return bool(
+        isinstance(secret, str)
+        and secret.strip()
+        and len(secret.encode("utf-8")) >= MIN_APP_SECRET_BYTES
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,12 +80,12 @@ class NotificationSettings:
 
     @property
     def email_enabled(self) -> bool:
-        return bool(self.app_secret and self.resend_api_key and self.resend_from)
+        return bool(is_valid_app_secret(self.app_secret) and self.resend_api_key and self.resend_from)
 
     @property
     def telegram_enabled(self) -> bool:
         return bool(
-            self.app_secret
+            is_valid_app_secret(self.app_secret)
             and self.telegram_bot_token
             and self.telegram_bot_username
             and self.telegram_webhook_secret
@@ -170,8 +194,8 @@ def decode_filter_values(value: str | None) -> tuple[str, ...]:
 
 
 def sign_action(secret: str, purpose: str, channel_id: int) -> str:
-    if not secret:
-        raise RuntimeError("APP_SECRET is not configured.")
+    if not is_valid_app_secret(secret):
+        raise RuntimeError("APP_SECRET must contain at least 32 bytes of random secret material.")
     payload = f"v1|{purpose}|{channel_id}".encode("utf-8")
     payload_text = base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
     signature = hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).digest()[:18]
@@ -180,6 +204,8 @@ def sign_action(secret: str, purpose: str, channel_id: int) -> str:
 
 
 def verify_action(secret: str, purpose: str, token: str) -> int | None:
+    if not is_valid_app_secret(secret) or not isinstance(token, str) or len(token) > 512:
+        return None
     try:
         payload_text, signature_text = token.split(".", 1)
         payload = base64.urlsafe_b64decode(payload_text + "=" * (-len(payload_text) % 4))
@@ -192,13 +218,14 @@ def verify_action(secret: str, purpose: str, token: str) -> int | None:
             return None
         if not hmac.compare_digest(signature, expected):
             return None
-        return int(channel_text)
+        channel_id = int(channel_text)
+        return channel_id if channel_id > 0 else None
     except (ValueError, TypeError, UnicodeDecodeError):
         return None
 
 
 def csrf_token(secret: str, action: str, on_date: date | None = None) -> str:
-    if not secret:
+    if not is_valid_app_secret(secret):
         return ""
     day = (on_date or utc_now().date()).isoformat()
     payload = f"csrf|{action}|{day}".encode("utf-8")
@@ -206,7 +233,11 @@ def csrf_token(secret: str, action: str, on_date: date | None = None) -> str:
 
 
 def verify_csrf(secret: str, action: str, supplied: str) -> bool:
-    if not secret or not supplied:
+    if (
+        not is_valid_app_secret(secret)
+        or not isinstance(supplied, str)
+        or re.fullmatch(r"[0-9a-f]{64}", supplied) is None
+    ):
         return False
     today = utc_now().date()
     return any(
@@ -225,6 +256,7 @@ class NotificationStore:
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.execute("PRAGMA busy_timeout=15000")
         self.connection.executescript(SCHEMA)
+        self.connection.executescript(EMAIL_REQUEST_SCHEMA)
         self.connection.execute("PRAGMA optimize")
 
     def close(self) -> None:
@@ -289,12 +321,17 @@ class NotificationStore:
 
     def create_email_subscription(
         self, email: str, search: SearchSpec, display_name: str = ""
-    ) -> tuple[ChannelRecord, str | None]:
+    ) -> tuple[ChannelRecord, str]:
+        """Stage changes until fresh email proof, without altering an existing account."""
         destination = validate_email(email)
         fingerprint = destination_fingerprint("email", destination)
-        now = utc_now().isoformat()
+        requested_at = utc_now()
+        now = requested_at.isoformat()
         raw_token = secrets.token_urlsafe(32)
         with self.connection:
+            self.connection.execute(
+                "DELETE FROM pending_email_subscriptions WHERE expires_at <= ?", (now,)
+            )
             existing = self.connection.execute(
                 """
                 SELECT nc.*, s.display_name
@@ -305,44 +342,37 @@ class NotificationStore:
                 (fingerprint,),
             ).fetchone()
             if existing is None:
-                subscriber_id = self._create_subscriber(display_name, now)
+                subscriber_id = self._create_subscriber("", now)
                 cursor = self.connection.execute(
                     """
                     INSERT INTO notification_channels (
                         subscriber_id, channel_type, destination,
-                        destination_fingerprint, status, verification_token_hash,
+                        destination_fingerprint, status,
                         created_at, updated_at
-                    ) VALUES (?, 'email', ?, ?, 'pending', ?, ?, ?)
+                    ) VALUES (?, 'email', ?, ?, 'pending', ?, ?)
                     """,
-                    (subscriber_id, destination, fingerprint, token_hash(raw_token), now, now),
+                    (subscriber_id, destination, fingerprint, now, now),
                 )
                 channel_id = int(cursor.lastrowid)
-                verification_token: str | None = raw_token
             else:
-                subscriber_id = int(existing["subscriber_id"])
                 channel_id = int(existing["id"])
-                if existing["status"] == "active":
-                    verification_token = None
-                else:
-                    verification_token = raw_token
-                    self.connection.execute(
-                        """
-                        UPDATE notification_channels
-                        SET destination = ?, status = 'pending',
-                            verification_token_hash = ?, unsubscribed_at = NULL,
-                            updated_at = ?
-                        WHERE id = ?
-                        """,
-                        (destination, token_hash(raw_token), now, channel_id),
-                    )
-                if display_name.strip():
-                    self.connection.execute(
-                        "UPDATE subscribers SET display_name = ?, updated_at = ? WHERE id = ?",
-                        (display_name.strip()[:120], now, subscriber_id),
-                    )
-            self._add_search(subscriber_id, search, now)
-            self._record_event("subscription_saved", "channel", str(channel_id), {"type": "email"})
-        return self.get_channel(channel_id), verification_token
+            self.connection.execute(
+                """
+                INSERT INTO pending_email_subscriptions (
+                    token_hash, channel_id, search_json, display_name, created_at, expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (token_hash(raw_token), channel_id, json.dumps(asdict(search)),
+                 display_name.strip()[:120], now, (requested_at + EMAIL_CONFIRMATION_TTL).isoformat()),
+            )
+        return self.get_channel(channel_id), raw_token
+
+    def discard_email_subscription_request(self, raw_token: str) -> None:
+        """Discard an undelivered proposal, leaving the subscription untouched."""
+        with self.connection:
+            self.connection.execute(
+                "DELETE FROM pending_email_subscriptions WHERE token_hash = ?", (token_hash(raw_token),)
+            )
 
     def create_telegram_subscription(
         self, search: SearchSpec, display_name: str = ""
@@ -368,6 +398,42 @@ class NotificationStore:
         return self.get_channel(channel_id), raw_token
 
     def verify_email(self, raw_token: str) -> ChannelRecord | None:
+        if not isinstance(raw_token, str) or len(raw_token) > 256:
+            return None
+        now = utc_now().isoformat()
+        with self.connection:
+            # Take the write lock before reading so simultaneous confirmations
+            # cannot apply the same proposal twice.
+            self.connection.execute(
+                "DELETE FROM pending_email_subscriptions WHERE expires_at <= ?", (now,)
+            )
+            request = self.connection.execute(
+                "SELECT * FROM pending_email_subscriptions WHERE token_hash = ?", (token_hash(raw_token),)
+            ).fetchone()
+            if request is not None:
+                channel_id = int(request["channel_id"])
+                channel = self.get_channel(channel_id)
+                self._add_search(channel.subscriber_id, SearchSpec(**json.loads(request["search_json"])), now)
+                if request["display_name"]:
+                    self.connection.execute(
+                        "UPDATE subscribers SET display_name = ?, updated_at = ? WHERE id = ?",
+                        (request["display_name"], now, channel.subscriber_id),
+                    )
+                self.connection.execute(
+                    """
+                    UPDATE notification_channels
+                    SET status = 'active', verification_token_hash = NULL,
+                        verified_at = COALESCE(verified_at, ?), unsubscribed_at = NULL, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (now, now, channel_id),
+                )
+                self.connection.execute(
+                    "DELETE FROM pending_email_subscriptions WHERE channel_id = ?", (channel_id,)
+                )
+                self._record_event("subscription_verified", "channel", str(channel_id), {"type": "email"})
+                return self.get_channel(channel_id)
+        # Accept legacy pending links only within the same 24-hour lifetime.
         return self._verify_channel(raw_token, "email", None, None)
 
     def verify_telegram(
@@ -391,8 +457,9 @@ class NotificationStore:
                 SELECT id, subscriber_id FROM notification_channels
                 WHERE channel_type = ? AND verification_token_hash = ?
                   AND status = 'pending'
+                  AND (channel_type != 'email' OR updated_at > ?)
                 """,
-                (channel_type, token_hash(raw_token)),
+                (channel_type, token_hash(raw_token), (utc_now() - EMAIL_CONFIRMATION_TTL).isoformat()),
             ).fetchone()
             if row is None:
                 return None
