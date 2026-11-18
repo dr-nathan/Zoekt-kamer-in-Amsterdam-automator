@@ -14,8 +14,51 @@ import pwd
 import shutil
 import sqlite3
 import subprocess
+import time
 import urllib.request
 from contextlib import closing
+
+
+def verify_release_files(release: Path, files: dict[str, str]) -> None:
+    for name, expected in files.items():
+        target = (release / name).resolve()
+        if not target.is_relative_to(release) or hashlib.sha256(target.read_bytes()).hexdigest() != expected:
+            raise SystemExit("Release files no longer match the reviewed manifest; prepare the release again.")
+
+
+def wait_for_background_jobs(wait_seconds: int) -> None:
+    """Let existing jobs finish without terminating them or changing configuration."""
+    deadline = time.monotonic() + wait_seconds
+    next_notice = 0.0
+    units = ("facebookrooms-collect.service", "facebookrooms-digest.service")
+    while True:
+        busy = []
+        for unit in units:
+            result = subprocess.run(
+                ["systemctl", "show", "--property=ActiveState,Job", unit],
+                capture_output=True, text=True, check=True,
+            )
+            properties = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+            state = properties.get("ActiveState")
+            job = properties.get("Job")
+            # systemctl prints an absent job as "Job=" on the production
+            # version; other versions print the numeric zero identifier.
+            if (job != "" and (job is None or not job.isascii() or not job.isdecimal())) or state not in {
+                "active", "activating", "reloading", "deactivating", "refreshing", "inactive", "failed"
+            }:
+                raise RuntimeError("Cannot determine whether background jobs are idle. Application configuration was not changed.")
+            if state not in {"inactive", "failed"} or job not in {"", "0"}:
+                busy.append(unit)
+        if not busy:
+            return
+        now = time.monotonic()
+        if now >= deadline:
+            raise RuntimeError("Timed out waiting for background jobs. Application configuration was not changed; scheduled jobs will be restored.")
+        if now >= next_notice:
+            print("Waiting for background jobs to finish: " + ", ".join(busy) +
+                  f" (up to {int(deadline - now)} seconds remaining). New scheduled jobs are paused.", flush=True)
+            next_notice = now + 60
+        time.sleep(min(5, deadline - now))
 
 
 def main() -> None:
@@ -23,7 +66,11 @@ def main() -> None:
     parser.add_argument("--app-dir", type=Path, required=True)
     parser.add_argument("--data-dir", type=Path, required=True)
     parser.add_argument("--private-feed", action="store_true")
+    parser.add_argument("--wait-seconds", type=int, default=2700,
+                        help="Wait up to this many seconds for running background jobs (default: 2700).")
     args = parser.parse_args()
+    if args.wait_seconds < 0:
+        parser.error("--wait-seconds must be zero or greater")
     if os.geteuid() != 0:
         raise SystemExit("Administrator privileges are required. Run this reviewed script with sudo.")
     os.umask(0o077)
@@ -42,10 +89,7 @@ def main() -> None:
     if not binary.is_file() or not (release / "requirements.lock").is_file():
         raise SystemExit("Prepare and test the release virtualenv before activation.")
     manifest = json.loads((release / "release-manifest.json").read_text())
-    for name, expected in manifest["files"].items():
-        target = (release / name).resolve()
-        if not target.is_relative_to(release) or hashlib.sha256(target.read_bytes()).hexdigest() != expected:
-            raise SystemExit("Release files no longer match the reviewed manifest; prepare the release again.")
+    verify_release_files(release, manifest["files"])
     owner = pwd.getpwuid(app.stat().st_uid)
     if owner.pw_uid == 0:
         raise SystemExit("The application must run as an unprivileged owner.")
@@ -60,17 +104,8 @@ def main() -> None:
             raise RuntimeError(f"{command[0]} failed; private diagnostics are in {backup}.")
 
     env = app / ".env"
-    env_stat = env.stat()
-    shutil.copy2(env, backup / "environment")
     caddy = Path("/etc/caddy/Caddyfile")
-    caddy_stat = caddy.stat()
-    shutil.copy2(caddy, backup / "Caddyfile")
-    with urllib.request.urlopen("http://127.0.0.1:2019/config/", timeout=5) as response:
-        (backup / "active-caddy.json").write_bytes(response.read())
     database = data / "listings.db"
-    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as source:
-        with closing(sqlite3.connect(backup / "listings.db")) as destination:
-            source.backup(destination)
     dropins: dict[Path, bytes | None] = {}
     operations = {
         "facebookrooms.service": [f"{binary} serve --database {database} --host 127.0.0.1 --port 8000"],
@@ -80,20 +115,28 @@ def main() -> None:
         ],
         "facebookrooms-digest.service": [f"{binary} digest --database {database}"],
     }
-    for unit in operations:
-        target = Path("/etc/systemd/system") / (unit + ".d") / "security-release.conf"
-        dropins[target] = target.read_bytes() if target.exists() else None
-    (backup / "dropins.json").write_text(json.dumps({str(k):v.decode() if v is not None else None for k,v in dropins.items()}))
-
     modified = False
     timer_names = ["facebookrooms-collect.timer", "facebookrooms-digest.timer"]
     active_timers = [name for name in timer_names if subprocess.run(["systemctl", "is-active", "--quiet", name], capture_output=True).returncode == 0]
     try:
         run(["systemctl", "stop", *timer_names])
-        for unit in ("facebookrooms-collect.service", "facebookrooms-digest.service"):
-            state = subprocess.run(["systemctl", "show", "--property=ActiveState", "--value", unit], capture_output=True, text=True, check=True).stdout.strip()
-            if state not in {"inactive", "failed"}:
-                raise RuntimeError("A background job is running; retry after it finishes. Application configuration was not changed.")
+        wait_for_background_jobs(args.wait_seconds)
+        # Snapshot only after existing jobs finish so a long wait does not
+        # leave the deployment with stale backups of their database changes.
+        env_stat = env.stat()
+        shutil.copy2(env, backup / "environment")
+        caddy_stat = caddy.stat()
+        shutil.copy2(caddy, backup / "Caddyfile")
+        with urllib.request.urlopen("http://127.0.0.1:2019/config/", timeout=5) as response:
+            (backup / "active-caddy.json").write_bytes(response.read())
+        with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as source:
+            with closing(sqlite3.connect(backup / "listings.db")) as destination:
+                source.backup(destination)
+        for unit in operations:
+            target = Path("/etc/systemd/system") / (unit + ".d") / "security-release.conf"
+            dropins[target] = target.read_bytes() if target.exists() else None
+        (backup / "dropins.json").write_text(json.dumps({str(k):v.decode() if v is not None else None for k,v in dropins.items()}))
+        verify_release_files(release, manifest["files"])
         modified = True
         command = ["python3", str(release / "deploy/configure-production.py"), "--app-dir", str(app), "--output", str(backup / "candidate.Caddyfile")]
         if args.private_feed:
@@ -123,7 +166,6 @@ def main() -> None:
         caddy.chmod(0o640)
         run(["systemctl", "daemon-reload"])
         run(["systemctl", "restart", "facebookrooms.service"])
-        import time
         for attempt in range(20):
             try:
                 request = urllib.request.Request("http://127.0.0.1:8000/health", headers={"Host": "facebookrooms.nl"})
