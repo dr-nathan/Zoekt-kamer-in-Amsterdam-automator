@@ -50,7 +50,8 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install audit tool
-        run: python -m pip install --only-binary=:all: pip-audit==2.10.1
+        run: |
+          python -m pip install --only-binary=:all: pip-audit==2.10.1
       - name: Audit locked runtime dependencies without executing the project
         run: python -m pip_audit -r requirements.lock --require-hashes --disable-pip --no-deps --strict --progress-spinner off
 
